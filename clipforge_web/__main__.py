@@ -1,6 +1,6 @@
 import os, shutil, subprocess, sys, threading, webbrowser
 import uvicorn
-
+#hello
 
 def open_window(url):
     """Open ClipForge in its own app-style window (no browser tabs) using Edge or Chrome; else the normal browser."""
