@@ -94,7 +94,7 @@ def motion_score(ffmpeg, src, n_frames):
     """Big sudden picture changes (crashes, explosions, chaos). Decodes only keyframes at a tiny size, so even an
     8-hour VOD takes a few minutes. Returns 0-1 per analysis frame, or None if nothing could be read."""
     sw, sh = 64, 36
-    raw = subprocess.run([ffmpeg, "-v", "error", "-skip_frame", "nokey", "-i", src, "-an", "-vf",
+    raw = subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-skip_frame", "nokey", "-i", src, "-an", "-vf",
                           f"fps=1,scale={sw}:{sh},format=gray", "-f", "rawvideo", "-"], capture_output=True).stdout
     n = len(raw) // (sw * sh)
     if n < 10:

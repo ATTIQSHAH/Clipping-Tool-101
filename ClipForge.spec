@@ -22,6 +22,7 @@ hidden = (
     collect_submodules('numpy') +
     collect_submodules('clipforge') +
     collect_submodules('clipforge_web') +
+    collect_submodules('curl_cffi') +
     ['engineio.async_drivers.threading',
      'h11', 'httptools', 'websockets', 'wsproto',
      'email.mime.multipart', 'email.mime.text',
@@ -51,6 +52,7 @@ datas += collect_data_files('pydantic_core')
 datas += collect_data_files('streamlink')
 datas += collect_data_files('pycountry')
 datas += collect_data_files('certifi')
+datas += collect_data_files('curl_cffi')
 
 # OpenCV haar cascades
 import cv2

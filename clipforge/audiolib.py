@@ -69,6 +69,6 @@ def make_starter_sfx(ffmpeg):
     for name, args in _STARTER.items():
         out = os.path.join(folder("sfx"), name)
         if not os.path.exists(out):
-            subprocess.run([ffmpeg, "-y", "-loglevel", "error"] + args + [out], check=True)
+            subprocess.run([ffmpeg, "-nostdin", "-y", "-loglevel", "error"] + args + [out], check=True)
             made.append(name)
     return made

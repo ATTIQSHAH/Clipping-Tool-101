@@ -43,7 +43,9 @@ try:
     code, clips = check_url('http://127.0.0.1:7890/api/videos/1/clips')
     print('GET /api/videos/1/clips:', code)
     clips_obj = json.loads(clips.decode('utf-8'))
-    print(f'Total clips: {len(clips_obj)}, clip 1 layout: {clips_obj[0].get("layout")}')
+    print(f'Total clips: {len(clips_obj)}')
+    if clips_obj:
+        print(f'Clip 1 layout: {clips_obj[0].get("layout")}')
 
     # Test GET /api/clips/1/cues
     code, cues = check_url('http://127.0.0.1:7890/api/clips/1/cues')

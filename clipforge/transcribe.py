@@ -27,12 +27,12 @@ def _load_wav(path):
     # Extract 16 kHz mono audio using ffmpeg for mp4, mkv, webm, etc.
     from .util import which
     ffmpeg = which("ffmpeg")
-    cmd = [ffmpeg, "-v", "error", "-i", path, "-ar", "16000", "-ac", "1", "-f", "s16le", "-"]
+    cmd = [ffmpeg, "-nostdin", "-v", "error", "-i", path, "-ar", "16000", "-ac", "1", "-f", "s16le", "-"]
     raw = subprocess.run(cmd, capture_output=True).stdout
     return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-def transcribe_file(wav, model="small", device="cpu", compute="int8", language=None, on_progress=None,
+def transcribe_file(wav, model="base", device="cpu", compute="int8", language=None, on_progress=None,
                     model_size=None, compute_type=None, should_stop=None):
     global _model, _loaded
     if model_size:
@@ -44,7 +44,9 @@ def transcribe_file(wav, model="small", device="cpu", compute="int8", language=N
     with _lock:
         if _model is None or _loaded != (model, device, compute):   # reload when Settings change the accuracy
             from faster_whisper import WhisperModel
-            _model = WhisperModel(model, device=device, compute_type=compute)
+            # Cap cpu_threads so Whisper never starves the web server / OS event loop
+            cpu_threads = max(1, min(4, (os.cpu_count() or 4) // 2))
+            _model = WhisperModel(model, device=device, compute_type=compute, cpu_threads=cpu_threads, num_workers=1)
             _loaded = (model, device, compute)
     audio = _load_wav(wav)
     total = max(len(audio) / 16000.0, 0.1)
@@ -53,6 +55,11 @@ def transcribe_file(wav, model="small", device="cpu", compute="int8", language=N
         segs, _ = _model.transcribe(audio, word_timestamps=True, vad_filter=True,
                                     language=language, condition_on_previous_text=False)
         for s in segs:
+            if should_stop:
+                should_stop()
+            if on_progress:
+                on_progress(min(1.0, s.end / total))
+            import time; time.sleep(0.002)
             if should_stop:
                 should_stop()
             if on_progress:

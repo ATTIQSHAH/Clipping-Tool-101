@@ -197,7 +197,7 @@ def analyze_video(job, video_id, p):
         a = np.load(acache)
     else:
         raw = os.path.join(work, "audio.raw")
-        job.run([ffmpeg, "-y", "-i", src, "-vn", "-ac", "1", "-ar", str(analyze.SR), "-f", "s16le", raw])
+        job.run([ffmpeg, "-nostdin", "-y", "-i", src, "-vn", "-ac", "1", "-ar", str(analyze.SR), "-f", "s16le", raw])
         a = analyze.audio_score(analyze.loudness_db(raw))
         os.remove(raw)
         np.save(acache, a)
@@ -242,7 +242,7 @@ def analyze_video(job, video_id, p):
         if not os.path.exists(tj):
             wav = os.path.join(work, "full.wav")
             if not os.path.exists(wav):
-                job.run([ffmpeg, "-y", "-i", src, "-vn", "-ac", "1", "-ar", "16000", wav])
+                job.run([ffmpeg, "-nostdin", "-y", "-i", src, "-vn", "-ac", "1", "-ar", "16000", wav])
             res = transcribe_file(wav, model, device, compute, p.get("language") or None,
                                   on_progress=lambda f: (job.check(), prog(video_id, 22 + f * 58, "Reading what is said")))
             with open(tj, "w", encoding="utf-8") as f:
@@ -253,12 +253,13 @@ def analyze_video(job, video_id, p):
     else:
         for i, c in enumerate(cands, 1):
             job.check()
+            import time; time.sleep(0.01)
             prog(video_id, 22 + 58 * i / len(cands), f"Reading what is said ({i} of {len(cands)})")
             key = f"win_{int(c['ws'] * 1000)}_{int(c['we'] * 1000)}"
             wav, tj = os.path.join(work, key + ".wav"), os.path.join(work, key + ".json")
             if not os.path.exists(tj):
                 if not os.path.exists(wav):
-                    job.run([ffmpeg, "-y", "-ss", f"{c['ws']:.3f}", "-t", f"{c['we'] - c['ws']:.3f}", "-i", src,
+                    job.run([ffmpeg, "-nostdin", "-y", "-ss", f"{c['ws']:.3f}", "-t", f"{c['we'] - c['ws']:.3f}", "-i", src,
                              "-vn", "-ac", "1", "-ar", "16000", wav])
                 with open(tj, "w", encoding="utf-8") as f:
                     json.dump(transcribe_file(wav, model, device, compute, p.get("language") or None), f)

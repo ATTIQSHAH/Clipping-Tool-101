@@ -281,8 +281,10 @@ function drawMain(){
     const ids=[...S.sel];
     if(!ids.length)return toast('Tick the clips you want first.',true);
     toast(`Approving ${ids.length} clip${ids.length>1?'s':''}…`);
-    for(const id of ids)await approve(id,true);
+    await send('POST','/api/clips/approve_batch',{ids});
+    for(const id of ids)S.autoDl.add(id);
     S.sel.clear();
+    await loadClips();
     toast('Selected clips approved and queued for download.');
     updateMain();
   });
@@ -756,11 +758,15 @@ function buildEditor(){
 
   const v=$('#pv');
   v.src='/api/clips/'+c.id+'/source#t='+c.start;
-  v.addEventListener('loadedmetadata',()=>{v.currentTime=S.clip.start;drawCaption();drawBanner();applyLayout();drawTrim();updateTimeCode()});
-  v.addEventListener('timeupdate',()=>{onTime();updateTimeCode()});
-  v.addEventListener('seeked',()=>{drawCaption();drawBanner();applyLayout();updateTimeCode()});
+  const onReady=()=>{ applyLayout(); drawCaption(); drawBanner(); drawTrim(); updateTimeCode(); };
+  v.addEventListener('loadedmetadata',()=>{ if(v.currentTime < S.clip.start) v.currentTime=S.clip.start; onReady(); });
+  v.addEventListener('loadeddata', onReady);
+  v.addEventListener('canplay', onReady);
+  v.addEventListener('timeupdate',()=>{ onTime(); updateTimeCode(); });
+  v.addEventListener('seeking',()=>{ applyLayout(); updateTimeCode(); });
+  v.addEventListener('seeked', onReady);
   v.addEventListener('play',()=>{$('#play').textContent='⏸';(function loop(){drawCaption();drawBanner();applyLayout();drawPh();sfxTick();if(!v.paused)requestAnimationFrame(loop)})()});
-  v.addEventListener('pause',()=>$('#play').textContent='▶');
+  v.addEventListener('pause',()=>{$('#play').textContent='▶'; onReady();});
 
   markSeg();drawCues();updateApproveUI();updDur();drawTrim();trimEvents();drawBanner();initCanvasDrag();initTimelineTracks();initPcUpload();
 
@@ -1200,9 +1206,11 @@ function posAt(t){const p=S.framing&&S.framing.pts;if(!p||!p.length)return null;
 
 function drawStack(v,f,c){
   const cv=$('#stackcv'),g=cv.getContext('2d'),W=cv.width,H=cv.height;
-  if(!v.videoWidth)return;
-  const k=v.videoWidth/f.w;
-  let camBox=(f.pip&&f.box ? f.box : f.cam).map(n=>n*k);
+  if(!v.videoWidth || v.readyState < 2) return;
+  g.clearRect(0, 0, W, H);
+  const fw = f.w || v.videoWidth;
+  const k = v.videoWidth / fw;
+  let camBox = ((f.pip && f.box ? f.box : f.cam) || [fw*0.35, (f.h||v.videoHeight)*0.05, fw*0.3, (f.h||v.videoHeight)*0.3]).map(n=>n*k);
   let [cx,cy,cw,ch]=camBox;
 
   // Center-anchored streamer cam zoom
@@ -1341,15 +1349,30 @@ function applyLayout(){
   const v=$('#pv');if(!v||!S.clip)return;const c=S.clip,f=S.framing;
   const stack=['stack','pip'].includes(c.layout)&&f&&f.stack&&f.cam,cv=$('#stackcv');
   const blur=v.videoWidth&&(c.layout==='blur'||(['stack','pip'].includes(c.layout)&&f&&f.stack&&!f.cam));
-  cv.hidden=!stack&&!blur;v.style.visibility=stack||blur?'hidden':'';
-  if(stack)drawStack(v,f,c);else if(blur)drawBlur(v,cv);
+  
+  if(!stack && !blur){
+    cv.hidden=true;
+    v.style.visibility='';
+    v.style.objectFit='cover';
+  } else {
+    cv.hidden=false;
+    if(v.readyState >= 2){
+      v.style.visibility='hidden';
+      if(stack) drawStack(v,f,c);
+      else if(blur) drawBlur(v,cv);
+    } else {
+      v.style.visibility='';
+      v.addEventListener('loadeddata',()=>applyLayout(),{once:true});
+      v.addEventListener('canplay',()=>applyLayout(),{once:true});
+    }
+  }
   v.style.objectFit=(c.layout==='blur'||(['stack','pip'].includes(c.layout)&&f&&f.stack&&!f.cam))?'contain':'cover';
   let x=.5;if(c.layout==='crop')x=c.crop_x;else if(c.layout==='follow'){const p=posAt(v.currentTime-c.start);x=p==null?.5:p}
   v.style.objectPosition=(x*100)+'% 50%';
 }
 function sizePhone(){const p=$('#phone'),w=$('#editor').clientWidth;if(p)p.style.setProperty('--w',(w>260?Math.min(236,w-80):236)+'px')}
 function playClip(){const v=$('#pv');if(!v.paused){v.pause();return}if(v.currentTime<S.clip.start||v.currentTime>=S.clip.end-.05)v.currentTime=S.clip.start;v.play()}
-function onTime(){const v=$('#pv');if(!v||!S.clip)return;drawPh();if(v.currentTime>=S.clip.end){if($('#loop').checked){v.currentTime=S.clip.start}else v.pause()}drawCaption()}
+function onTime(){const v=$('#pv');if(!v||!S.clip)return;drawPh();if(v.currentTime>=S.clip.end){if($('#loop').checked){v.currentTime=S.clip.start}else v.pause()}drawCaption();applyLayout();}
 function drawCaption(){
   const v=$('#pv'),cap=$('#cap'),c=S.clip;if(!v||!cap||!c)return;
   const t=S.tpl[c.template];if(!t||!c.captions){cap.innerHTML='';return}

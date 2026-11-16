@@ -81,8 +81,10 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         elif cam_pos == "pip_center":
             ox, oy = "(W-w)/2", "(H-h)/2"
         else:
-            ox = f"int((W-w)*{max(0.05, min(float(cam_pos_x or 0.5), 0.95))})"
-            oy = f"int((H-h)*{max(0.05, min(float(cam_pos_y or 0.65), 0.95))})"
+            val_x = max(0.02, min(float(cam_pos_x or 0.5), 0.98))
+            val_y = max(0.02, min(float(cam_pos_y or 0.65), 0.98))
+            ox = f"(W-w)*{val_x:.3f}"
+            oy = f"(H-h)*{val_y:.3f}"
 
         # Shape mask (circle / rectangle)
         if cam_shape == "circle":
@@ -126,7 +128,7 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         x = int((w - cw) * min(max(crop_x, 0), 1)) // 2 * 2
         fc = f"[0:v]crop={cw}:{h}:{x}:0,scale={W}:{H}:flags=lanczos,setsar=1{zoom},ass={ass}[v]"
     af, extra_in = _audio_graph(music, music_vol, duck, sfx, 1)
-    cmd = ([ffmpeg, "-y", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", os.path.abspath(src)] + extra_in +
+    cmd = ([ffmpeg, "-nostdin", "-y", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", os.path.abspath(src)] + extra_in +
            ["-filter_complex", fc + ";" + af, "-map", "[v]", "-map", "[aout]"] + ENC[encoder] +
            ["-r", str(fps), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
             "-t", f"{dur:.3f}", "-movflags", "+faststart", os.path.abspath(out_path)])

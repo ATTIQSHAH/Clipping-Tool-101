@@ -27,7 +27,7 @@ def crop_width(h):
 
 def _read_frames(ffmpeg, src, start, end, W, H, fps, sw=512):
     sh = _even(round(sw * H / W))
-    cmd = [ffmpeg, "-v", "error", "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", src,
+    cmd = [ffmpeg, "-nostdin", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", src,
            "-vf", f"fps={fps},scale={sw}:{sh}", "-f", "rawvideo", "-pix_fmt", "gray", "-"]
     raw = subprocess.run(cmd, capture_output=True).stdout
     n = len(raw) // (sw * sh)

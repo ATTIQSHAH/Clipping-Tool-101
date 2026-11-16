@@ -1,9 +1,17 @@
 """Download videos, clips and chats from YouTube, Twitch and other web video platforms."""
 import json, os, re, shutil, subprocess
 
-from .util import which
+from .util import which, silent_flags
 
 _PCT = re.compile(r"\[download\]\s+([\d.]+)%")
+
+
+def _impersonate_args():
+    try:
+        import curl_cffi
+        return ["--impersonate", "chrome"]
+    except ImportError:
+        return []
 
 
 def _fmt(h):
@@ -59,17 +67,21 @@ def _js_args():
 
 
 def _auth_args(cookies_spec=None):
-    return _cookie_args(cookies_spec) + _js_args()
+    return _cookie_args(cookies_spec) + _js_args() + _impersonate_args()
 
 
 def download(job, url, outdir, max_height=1080, cookies_browser=None, on_progress=None):
     os.makedirs(outdir, exist_ok=True)
     ytdlp = which("yt-dlp")
     extra = _auth_args(cookies_browser)
-    r = subprocess.run([ytdlp, "--get-id", "--no-playlist"] + extra + [url], capture_output=True, text=True)
+    r = subprocess.run([ytdlp, "--get-id", "--no-playlist"] + extra + [url],
+                       capture_output=True, text=True, **silent_flags())
     err = (r.stderr or "").lower()
-    if r.returncode != 0 and ("confirm your age" in err or "age-restricted" in err):
-        raise RuntimeError("This video is Age-Restricted (18+) by YouTube. Please upload your fresh cookies.txt in Settings or use a regular video.")
+    if r.returncode != 0:
+        if "confirm your age" in err or "age-restricted" in err:
+            raise RuntimeError("This video is Age-Restricted (18+) by YouTube. Please upload your fresh cookies.txt in Settings or use a regular video.")
+        if "not currently live" in err or "offline" in err or "no playable streams" in err:
+            raise RuntimeError("The streamer is currently offline. Please wait until they go live or paste a recorded video / VOD link.")
     vid = (r.stdout.strip().splitlines() or ["video"])[0]
     base = os.path.join(outdir, f"source_{vid}_{max_height}")
     if not os.path.exists(base + ".mp4"):
@@ -113,7 +125,7 @@ def youtube_chat(url, base, cookies_browser=None):
         try:
             subprocess.run([which("yt-dlp"), "--skip-download", "--write-subs", "--sub-langs", "live_chat",
                             "--no-playlist", "-o", base + ".%(ext)s"] + extra + [url],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3600)
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3600, **silent_flags())
         except Exception:
             return []
     if not os.path.exists(path):

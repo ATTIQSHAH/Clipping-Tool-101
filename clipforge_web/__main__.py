@@ -14,15 +14,15 @@ if os.name == "nt" and not getattr(subprocess, "_clipforge_silent_applied", Fals
                 if "msedge" in c0 or "chrome" in c0:
                     is_browser = True
             if not is_browser:
-                if "creationflags" not in kwargs:
-                    kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-                else:
-                    kwargs["creationflags"] |= subprocess.CREATE_NO_WINDOW
-                if "startupinfo" not in kwargs:
+                kwargs["creationflags"] = (kwargs.get("creationflags") or 0) | subprocess.CREATE_NO_WINDOW
+                si = kwargs.get("startupinfo")
+                if si is None:
                     si = subprocess.STARTUPINFO()
-                    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                    si.wShowWindow = 0
-                    kwargs["startupinfo"] = si
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = 0
+                kwargs["startupinfo"] = si
+                if "stdin" not in kwargs or kwargs.get("stdin") is None:
+                    kwargs["stdin"] = subprocess.DEVNULL
             super().__init__(*args, **kwargs)
 
     subprocess.Popen = _SilentPopen

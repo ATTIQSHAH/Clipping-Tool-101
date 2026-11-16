@@ -6,4 +6,5 @@ opencv-python-headless<5
 fastapi
 uvicorn
 python-multipart
+curl-cffi>=0.7.0
 

@@ -78,8 +78,14 @@ def conn():
                     shutil.copy2(old_db, db_file)
                 except Exception:
                     pass
-        _conn = sqlite3.connect(db_file, check_same_thread=False)
+        _conn = sqlite3.connect(db_file, check_same_thread=False, timeout=60.0)
         _conn.row_factory = sqlite3.Row
+        try:
+            _conn.execute("PRAGMA journal_mode=WAL;")
+            _conn.execute("PRAGMA synchronous=NORMAL;")
+            _conn.execute("PRAGMA busy_timeout=60000;")
+        except Exception:
+            pass
         _conn.executescript(SCHEMA)
         for table, cols in MIGRATE.items():                     # upgrade databases from older versions
             have = [r[1] for r in _conn.execute(f"pragma table_info({table})").fetchall()]
@@ -91,16 +97,30 @@ def conn():
 
 
 def q(sql, args=(), one=False):
-    with _lock:
-        rows = [dict(r) for r in conn().execute(sql, args).fetchall()]
-    return (rows[0] if rows else None) if one else rows
+    for attempt in range(5):
+        try:
+            with _lock:
+                rows = [dict(r) for r in conn().execute(sql, args).fetchall()]
+            return (rows[0] if rows else None) if one else rows
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower() and attempt < 4:
+                time.sleep(0.1 * (attempt + 1))
+                continue
+            raise
 
 
 def ex(sql, args=()):
-    with _lock:
-        cur = conn().execute(sql, args)
-        conn().commit()
-        return cur.lastrowid
+    for attempt in range(5):
+        try:
+            with _lock:
+                cur = conn().execute(sql, args)
+                conn().commit()
+                return cur.lastrowid
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower() and attempt < 4:
+                time.sleep(0.1 * (attempt + 1))
+                continue
+            raise
 
 
 def now():

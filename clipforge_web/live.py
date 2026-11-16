@@ -8,7 +8,7 @@ from clipforge import analyze
 from clipforge.segments import snap, text_score, title_of
 from clipforge.source import live_chat_line
 from clipforge.transcribe import load_json, transcribe_file
-from clipforge.util import probe, which
+from clipforge.util import probe, which, silent_flags
 from . import db, engine
 
 SESSIONS = {}
@@ -161,7 +161,7 @@ class NoChat:
 # ---------------- the live session ----------------
 def source_cmd(url):
     if TEST_FILES and os.path.exists(url):                    # test source: a local file played like a stream
-        return [which("ffmpeg"), "-v", "error", "-readrate", os.environ.get("CLIPFORGE_TEST_READRATE", "1"),
+        return [which("ffmpeg"), "-nostdin", "-v", "error", "-readrate", os.environ.get("CLIPFORGE_TEST_READRATE", "1"),
                 "-i", url, "-c", "copy", "-f", "mpegts", "pipe:1"]
     return [which("streamlink"), "--stdout", "--quiet", "--retry-streams", "3", "--retry-max", "3", url, "best"]
 
@@ -196,12 +196,12 @@ class Live:
     def start(self):
         try:
             self.src = subprocess.Popen(source_cmd(self.url), stdout=subprocess.PIPE,
-                                        stderr=open(os.path.join(self.dir, "source.log"), "wb"))
-            seg_cmd = [which("ffmpeg"), "-y", "-v", "error", "-i", "pipe:0", "-c", "copy", "-f", "segment",
+                                        stderr=open(os.path.join(self.dir, "source.log"), "wb"), **silent_flags())
+            seg_cmd = [which("ffmpeg"), "-nostdin", "-y", "-v", "error", "-i", "pipe:0", "-c", "copy", "-f", "segment",
                        "-segment_time", str(SEG_SECONDS), "-segment_format", "mpegts", "-segment_list", "list.csv",
                        "-segment_list_type", "csv", "-reset_timestamps", "1", "seg_%06d.ts"]
             self.seg = subprocess.Popen(seg_cmd, stdin=self.src.stdout, cwd=self.dir,
-                                        stderr=open(os.path.join(self.dir, "segmenter.log"), "wb"))
+                                        stderr=open(os.path.join(self.dir, "segmenter.log"), "wb"), **silent_flags())
             self.src.stdout.close()
             self.procs = [self.src, self.seg]
         except Exception as e:
@@ -245,8 +245,8 @@ class Live:
         return new
 
     def _add_audio(self, name):
-        raw = subprocess.run([which("ffmpeg"), "-v", "error", "-i", os.path.join(self.dir, name), "-vn", "-ac", "1",
-                              "-ar", "16000", "-f", "s16le", "-"], capture_output=True).stdout
+        raw = subprocess.run([which("ffmpeg"), "-nostdin", "-v", "error", "-i", os.path.join(self.dir, name), "-vn", "-ac", "1",
+                              "-ar", "16000", "-f", "s16le", "-"], capture_output=True, **silent_flags()).stdout
         self.samples = np.concatenate([self.samples, np.frombuffer(raw[: len(raw) // 2 * 2], dtype=np.int16)])
         n = int(analyze.SR * analyze.FRAME)
         while len(self.samples) >= n:
@@ -269,10 +269,14 @@ class Live:
             new = self._read_segments()                        # read before judging, a short stream may be done
             if ended and not self.segs:
                 try:
-                    tail = open(os.path.join(self.dir, "source.log"), errors="replace").read()[-300:].strip()
+                    tail = open(os.path.join(self.dir, "source.log"), errors="replace").read()[-500:].strip()
                 except Exception:
                     tail = ""
-                self._fail("Couldn't open the stream. Is the channel live? " + tail)
+                tl = tail.lower()
+                if "no playable streams" in tl or "not currently live" in tl or "404" in tl or "offline" in tl:
+                    self._fail(f"Channel '{self.channel}' is currently offline on {self.platform.title()}. Please wait until they go live, or enter an active stream.")
+                else:
+                    self._fail("Couldn't open the stream. Is the channel live? " + tail)
                 return
             for name, s, e in new:
                 if self.t0 is None:
@@ -396,15 +400,15 @@ class Live:
             for name, _, _ in use:
                 f.write("file '" + os.path.join(self.dir, name).replace("\\", "/").replace("'", "'\\''") + "'\n")
         out = os.path.join(self.dir, "moments", f"m{k}.mp4")
-        r = subprocess.run([ff, "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy",
-                            "-bsf:a", "aac_adtstoasc", out], capture_output=True)
+        r = subprocess.run([ff, "-nostdin", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy",
+                            "-bsf:a", "aac_adtstoasc", out], capture_output=True, **silent_flags())
         if r.returncode != 0:                                  # unusual audio: re-encode the short excerpt instead
-            subprocess.run([ff, "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c:v", "libx264",
-                            "-preset", "veryfast", "-c:a", "aac", out], check=True, capture_output=True)
+            subprocess.run([ff, "-nostdin", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c:v", "libx264",
+                            "-preset", "veryfast", "-c:a", "aac", out], check=True, capture_output=True, **silent_flags())
         offset = use[0][1]
         info = probe(which("ffprobe"), out)
         wav = os.path.join(self.dir, f"m{k}.wav")
-        subprocess.run([ff, "-y", "-v", "error", "-i", out, "-vn", "-ac", "1", "-ar", "16000", wav], check=True)
+        subprocess.run([ff, "-nostdin", "-y", "-v", "error", "-i", out, "-vn", "-ac", "1", "-ar", "16000", wav], check=True, **silent_flags())
         words = transcribe_file(wav, db.setting("model", cfg["model"]), "cpu", "int8")["words"]
         rel_peak = peak_t - offset
         s, e = snap(words, rel_peak - cfg["lead"], rel_peak + cfg["tail"], 12.0, 50.0, info["duration"], info["fps"])
@@ -504,7 +508,7 @@ def set_watch_list(text):
 
 
 def is_live(url):
-    r = subprocess.run([which("streamlink"), "--json", url], capture_output=True, text=True, timeout=120)
+    r = subprocess.run([which("streamlink"), "--json", url], capture_output=True, text=True, timeout=120, **silent_flags())
     try:
         return bool(json.loads(r.stdout).get("streams"))
     except ValueError:

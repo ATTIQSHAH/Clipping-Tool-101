@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from clipforge import ai, audiolib, source
 from clipforge.captions import TEMPLATES
 from clipforge.render import RES
-from clipforge.util import which
+from clipforge.util import which, silent_flags
 from . import db, engine, live, worker
 
 app = FastAPI(title="ClipForge")
@@ -258,13 +258,36 @@ def approve_all_clips(vid: int):
     clips = db.q("select id, render_path, render_status from clips where video_id=?", (vid,))
     count = 0
     for c in clips:
-        cid = c["id"]
-        db.ex("update clips set status='approved' where id=?", (cid,))
-        is_rendered = bool(c["render_path"] and os.path.exists(c["render_path"]))
-        needs_render = not is_rendered
-        if needs_render and c["render_status"] != "running":
-            worker.enqueue("render", cid)
-        count += 1
+        try:
+            cid = c["id"]
+            db.ex("update clips set status='approved' where id=?", (cid,))
+            is_rendered = bool(c["render_path"] and os.path.exists(c["render_path"]))
+            needs_render = not is_rendered
+            if needs_render and c["render_status"] != "running":
+                worker.enqueue("render", cid)
+            count += 1
+        except Exception:
+            pass
+    return {"ok": True, "approved_count": count}
+
+
+@app.post("/api/clips/approve_batch")
+def approve_batch_clips(body: dict = Body(...)):
+    ids = body.get("ids") or []
+    count = 0
+    for cid in ids:
+        try:
+            cid = int(cid)
+            c = db.q("select id, render_path, render_status from clips where id=?", (cid,), one=True)
+            if not c:
+                continue
+            db.ex("update clips set status='approved' where id=?", (cid,))
+            is_rendered = bool(c["render_path"] and os.path.exists(c["render_path"]))
+            if not is_rendered and c["render_status"] != "running":
+                worker.enqueue("render", cid)
+            count += 1
+        except Exception:
+            pass
     return {"ok": True, "approved_count": count}
 
 
@@ -430,8 +453,8 @@ def _thumb(src, t, out):
     if not os.path.exists(out):
         if not src or not os.path.exists(src):
             raise HTTPException(404, "No picture yet.")
-        subprocess.run([which("ffmpeg"), "-v", "error", "-y", "-ss", f"{max(t, 0):.2f}", "-i", src, "-frames:v", "1",
-                        "-vf", "scale=320:-2", "-q:v", "5", out], capture_output=True, timeout=60)
+        subprocess.run([which("ffmpeg"), "-nostdin", "-v", "error", "-y", "-ss", f"{max(t, 0):.2f}", "-i", src, "-frames:v", "1",
+                        "-vf", "scale=320:-2", "-q:v", "5", out], capture_output=True, timeout=60, **silent_flags())
         if not os.path.exists(out):
             raise HTTPException(404, "No picture yet.")
     return FileResponse(out, media_type="image/jpeg", headers={"Cache-Control": "max-age=86400"})
