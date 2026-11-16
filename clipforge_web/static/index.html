@@ -1205,8 +1205,14 @@ function posAt(t){const p=S.framing&&S.framing.pts;if(!p||!p.length)return null;
   const a=p[lo],b=p[hi];if(t<=a[0])return a[1];if(t>=b[0])return b[1];return a[1]+(b[1]-a[1])*(t-a[0])/Math.max(b[0]-a[0],1e-6)}
 
 function drawStack(v,f,c){
-  const cv=$('#stackcv'),g=cv.getContext('2d'),W=cv.width,H=cv.height;
-  if(!v.videoWidth || v.readyState < 2) return;
+  const cv=$('#stackcv');
+  if(!cv||!v.videoWidth||v.readyState<1) return;
+  const ph=$('#phone');
+  if(ph){
+    const pw=ph.clientWidth||270, ph_h=ph.clientHeight||480;
+    if(cv.width!==pw||cv.height!==ph_h){cv.width=pw;cv.height=ph_h}
+  }
+  const g=cv.getContext('2d'),W=cv.width,H=cv.height;
   g.clearRect(0, 0, W, H);
   const fw = f.w || v.videoWidth;
   const k = v.videoWidth / fw;
@@ -1228,61 +1234,82 @@ function drawStack(v,f,c){
   const vh = v.videoHeight;
 
   if(isPip){
-    // Full screen gameplay
-    const gw = Math.min(v.videoWidth, vh * 9 / 16);
-    const gx = (v.videoWidth - gw) * (c.crop_x ?? 0.5);
-    g.drawImage(v, gx, 0, gw, vh, 0, 0, W, H);
+    // 1. Blurred background filling the 9:16 phone
+    g.save();
+    g.filter = 'blur(16px) brightness(0.65)';
+    const bgScale = Math.max(W / v.videoWidth, H / vh);
+    const bgW = v.videoWidth * bgScale, bgH = vh * bgScale;
+    g.drawImage(v, (W - bgW) / 2, (H - bgH) / 2, bgW, bgH);
+    g.restore();
 
-    // Floating overlay cam (Speed reaction cutout style)
-    const pw = Math.round(W * (shape === 'circle' ? 0.44 : (f.size || 0.46)));
-    const ph = shape === 'circle' ? pw : Math.round(pw * (ch / cw));
-    let px = Math.round((W - pw) / 2);
-    let py = Math.round(H * 0.65);
+    // 2. Crisp 16:9 gameplay centered
+    const gh = Math.round(W * vh / v.videoWidth);
+    const gy = Math.round((H - gh) / 2);
+    g.drawImage(v, 0, 0, v.videoWidth, vh, 0, gy, W, gh);
+
+    // 3. Floating Streamer Reaction Camera
+    const pw = Math.round(W * (shape === 'circle' ? 0.44 : 0.48));
+    const ph_cam = shape === 'circle' ? pw : Math.round(pw * (ch / cw));
+    let px = Math.round((W - pw) * Math.max(0, Math.min(1, c.cam_pos_x ?? 0.5)));
+    let py = Math.round((H - ph_cam) * Math.max(0, Math.min(1, c.cam_pos_y ?? 0.65)));
     if(c.cam_pos === 'pip_top') py = Math.round(H * 0.12);
-    else if(c.cam_pos === 'pip_center') py = Math.round((H - ph) / 2);
-    if(c.cam_pos_x != null && c.cam_pos_y != null){
-      px = Math.round((W - pw) * Math.max(0, Math.min(1, c.cam_pos_x)));
-      py = Math.round((H - ph) * Math.max(0, Math.min(1, c.cam_pos_y)));
-    }
+    else if(c.cam_pos === 'pip_center') py = Math.round((H - ph_cam) / 2);
 
-    S.camBox = { x: px, y: py, w: pw, h: ph, shape: shape };
+    S.camBox = { x: px, y: py, w: pw, h: ph_cam, shape: shape };
 
     g.save();
     if(shape === 'circle'){
       g.beginPath();
-      g.arc(px + pw/2, py + ph/2, Math.min(pw, ph)/2, 0, Math.PI * 2);
+      g.arc(px + pw/2, py + ph_cam/2, Math.min(pw, ph_cam)/2, 0, Math.PI * 2);
       g.clip();
-    }
-    g.drawImage(v, zx, zy, zw, zh, px, py, pw, ph);
-    g.restore();
-
-    // Stylish drag border and handle indicator
-    g.beginPath();
-    if(shape === 'circle'){
-      g.arc(px + pw/2, py + ph/2, Math.min(pw, ph)/2, 0, Math.PI * 2);
+      g.drawImage(v, zx, zy, zw, zh, px, py, pw, ph_cam);
+      g.restore();
+      g.beginPath();
+      g.arc(px + pw/2, py + ph_cam/2, Math.min(pw, ph_cam)/2, 0, Math.PI * 2);
+      g.strokeStyle = '#8c9bff';
+      g.lineWidth = 2.5;
+      g.stroke();
     } else {
-      g.rect(px, py, pw, ph);
+      g.beginPath();
+      if(typeof g.roundRect === 'function'){
+        g.roundRect(px, py, pw, ph_cam, 8);
+      } else {
+        g.rect(px, py, pw, ph_cam);
+      }
+      g.clip();
+      g.drawImage(v, zx, zy, zw, zh, px, py, pw, ph_cam);
+      g.restore();
+      g.beginPath();
+      if(typeof g.roundRect === 'function'){
+        g.roundRect(px, py, pw, ph_cam, 8);
+      } else {
+        g.rect(px, py, pw, ph_cam);
+      }
+      g.strokeStyle = '#8c9bff';
+      g.lineWidth = 2.5;
+      g.stroke();
     }
-    g.strokeStyle = '#8c9bffcc';
-    g.lineWidth = 2.5;
-    g.stroke();
 
     // Drag badge
-    g.fillStyle = '#0f1424dd';
+    g.fillStyle = '#0f1424ee';
     g.beginPath();
-    g.roundRect(px + pw/2 - 28, py + 4, 56, 18, 4);
+    if(typeof g.roundRect === 'function'){
+      g.roundRect(px + pw/2 - 32, py + 4, 64, 18, 4);
+    } else {
+      g.rect(px + pw/2 - 32, py + 4, 64, 18);
+    }
     g.fill();
     g.fillStyle = '#fff';
     g.font = 'bold 9.5px sans-serif';
     g.textAlign = 'center';
-    g.fillText('✥ Drag', px + pw/2, py + 16);
+    g.fillText('✥ Drag Cam', px + pw/2, py + 16);
     return;
   }
 
   // Dual-cam stacked
   if(isBottom){
     // Gameplay on top (60%), streamer bottom (40%)
-    const gh = Math.round(H * 0.6), ch_dst = H - gh;
+    const gh = Math.round(H * 0.58), ch_dst = H - gh;
     const gw = Math.min(v.videoWidth, vh * W / gh), gx = (v.videoWidth - gw) * (c.crop_x ?? 0.5);
     g.drawImage(v, gx, 0, gw, vh, 0, 0, W, gh);
 
@@ -1300,7 +1327,7 @@ function drawStack(v,f,c){
       g.restore();
       g.beginPath();
       g.arc(cx_dst + diam/2, cy_dst + diam/2, diam/2, 0, Math.PI * 2);
-      g.strokeStyle = '#ffffff60';
+      g.strokeStyle = '#8c9bff';
       g.lineWidth = 2;
       g.stroke();
     } else {
@@ -1328,7 +1355,7 @@ function drawStack(v,f,c){
       g.restore();
       g.beginPath();
       g.arc(cx_dst + diam/2, cy_dst + diam/2, diam/2, 0, Math.PI * 2);
-      g.strokeStyle = '#ffffff60';
+      g.strokeStyle = '#8c9bff';
       g.lineWidth = 2;
       g.stroke();
     } else {
@@ -1351,17 +1378,17 @@ function applyLayout(){
   const blur=v.videoWidth&&(c.layout==='blur'||(['stack','pip'].includes(c.layout)&&f&&f.stack&&!f.cam));
   
   if(!stack && !blur){
-    cv.hidden=true;
+    if(cv) cv.hidden=true;
     v.style.visibility='';
     v.style.objectFit='cover';
   } else {
-    cv.hidden=false;
-    if(v.readyState >= 2){
-      v.style.visibility='hidden';
+    if(cv) cv.hidden=false;
+    // Keep video element visible underneath so Chromium continues frame decoding pipeline
+    v.style.visibility='';
+    if(v.readyState >= 1){
       if(stack) drawStack(v,f,c);
       else if(blur) drawBlur(v,cv);
     } else {
-      v.style.visibility='';
       v.addEventListener('loadeddata',()=>applyLayout(),{once:true});
       v.addEventListener('canplay',()=>applyLayout(),{once:true});
     }

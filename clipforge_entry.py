@@ -73,5 +73,6 @@ try:
 except Exception:
     pass
 
+import clipforge_web.server
 from clipforge_web.__main__ import main
 main()

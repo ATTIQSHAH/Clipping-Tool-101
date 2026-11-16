@@ -54,7 +54,8 @@ def main():
                  "Set CLIPFORGE_PASSWORD first (or keep CLIPFORGE_HOST unset to stay on this computer only).")
     if host in ("127.0.0.1", "localhost"):
         threading.Timer(1.5, lambda: open_window(f"http://127.0.0.1:{port}")).start()
-    uvicorn.run("clipforge_web.server:app", host=host, port=port, log_level="warning")
+    from clipforge_web.server import app
+    uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
 if __name__ == "__main__":

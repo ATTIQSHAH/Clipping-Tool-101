@@ -94,9 +94,14 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         else:
             shape_filter = f",scale={pw}:{ph}:flags=lanczos"
 
-        fc = (f"[0:v]split[a][b];[b]crop={gw}:{h}:{gx}:0,scale={W}:{H}:flags=lanczos[bg];"
-              f"[a]crop={cw_}:{ch_}:{cx}:{cy}{shape_filter}[pip];"
-              f"[bg][pip]overlay={ox}:{oy},setsar=1{zoom},ass={ass}[v]")
+        # Viral Shorts layout: Crisp 16:9 gameplay centered + blurred 9:16 background + floating streamer cam
+        game_h = int(W * h / w) // 2 * 2
+        fc = (f"[0:v]split=3[v_bg][v_game][v_pip];"
+              f"[v_bg]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=25:6[bg];"
+              f"[v_game]scale={W}:{game_h}:flags=lanczos[game];"
+              f"[v_pip]crop={cw_}:{ch_}:{cx}:{cy}{shape_filter}[pip];"
+              f"[bg][game]overlay=0:(H-h)/2[base];"
+              f"[base][pip]overlay={ox}:{oy},setsar=1{zoom},ass={ass}[v]")
     elif layout == "stack" and cam and w / h > 9 / 16 + 0.01:
         from .faces import TOP_SHARE
         th = int(H * TOP_SHARE) // 2 * 2
