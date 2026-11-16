@@ -4,10 +4,10 @@ import numpy as np
 
 from clipforge import ai, analyze, audiolib, captions, faces
 from clipforge.render import RES, render_clip
-from clipforge.segments import HOOK_WORDS, snap, text_score
-from clipforge.source import download, youtube_chat
+from clipforge.segments import HOOK_WORDS, snap, text_score, title_of
+from clipforge.source import download, download_section, youtube_chat
 from clipforge.transcribe import load_json, transcribe_file
-from clipforge.util import probe, which
+from clipforge.util import Cancelled, probe, which
 from . import db
 
 
@@ -36,7 +36,20 @@ def ai_key():
 
 def clip_source(clip, video):
     """Live moments are cut into their own small file; everything else comes from the video."""
-    return clip.get("src") or video["path"]
+    src = clip.get("src") or video.get("path")
+    if src and os.path.exists(src):
+        return src
+    if src:
+        base = os.path.basename(src)
+        cand = os.path.join(vdir(video["id"]), base)
+        if os.path.exists(cand):
+            return cand
+    vd = vdir(video["id"])
+    if os.path.isdir(vd):
+        for f in os.listdir(vd):
+            if f.endswith((".mp4", ".mkv", ".webm")) and not f.endswith(".info.json"):
+                return os.path.join(vd, f)
+    return src
 
 
 # ---------------- import ----------------
@@ -46,17 +59,40 @@ def ingest(job, video_id, params):
     title = v["title"]
     prog(video_id, 0, "Getting your video")
     if v["source"].startswith(("http://", "https://")):
-        path, info = download(job, v["source"], vdir(video_id), int(params.get("max_height") or 1080),
+        hd = int(params.get("max_height") or 1080)
+        quick = bool(params.get("quick"))     # small copy to find clips; full quality fetched per clip at render
+        path, info = download(job, v["source"], vdir(video_id), 360 if quick else hd,
                               params.get("cookies_browser") or None,
-                              on_progress=lambda f: prog(video_id, f * 95, "Downloading the video"))
+                              on_progress=lambda f: prog(video_id, f * 95, "Downloading a quick copy" if quick
+                                                         else "Downloading the video"))
+        db.ex("update videos set hd=?, cookies=? where id=?",
+              (hd if quick else 0, params.get("cookies_browser") or None, video_id))
         title = (info or {}).get("title") or title
         if "youtube.com" in v["source"] or "youtu.be" in v["source"]:
             prog(video_id, 96, "Reading the chat replay")
-            events = youtube_chat(v["source"], os.path.splitext(path)[0], params.get("cookies_browser") or None)
-            if len(events) >= 20:
-                with open(os.path.join(wdir(video_id), "chat.txt"), "w", encoding="utf-8") as f:
-                    f.write("\n".join(f"{t:.2f} {m.replace(chr(10), ' ')}" for t, m in events))
-                job.log(f"Chat replay: {len(events)} messages.")
+            try:
+                chat_path = youtube_chat(v["source"], os.path.splitext(path)[0], params.get("cookies_browser") or None)
+                if chat_path and os.path.exists(chat_path):
+                    events = []
+                    with open(chat_path, "r", encoding="utf-8") as cf:
+                        for line in cf:
+                            try:
+                                d = json.loads(line)
+                                item = d.get("replayChatItemAction", {}).get("actions", [{}])[0]
+                                act = item.get("addChatItemAction", {}).get("item", {})
+                                msg_renderer = act.get("liveChatTextMessageRenderer", {})
+                                t = int(d.get("videoOffsetTimeMsec", 0)) / 1000.0
+                                msg = "".join(p.get("text", "") for p in msg_renderer.get("message", {}).get("runs", []))
+                                if msg:
+                                    events.append((t, msg))
+                            except Exception:
+                                pass
+                    if events and len(events) >= 20:
+                        with open(os.path.join(wdir(video_id), "chat.txt"), "w", encoding="utf-8") as cf:
+                            cf.write("\n".join(f"{t:.2f} {m.replace(chr(10), ' ')}" for t, m in events))
+                        job.log(f"Chat replay: {len(events)} messages.")
+            except Exception as e:
+                job.log(f"Chat replay note: {e}")
     else:
         path = v["path"]
     ffprobe = which("ffprobe")
@@ -264,14 +300,14 @@ def analyze_video(job, video_id, p):
         hooks = [h for h in HOOK_WORDS if h in txt]
         first = " ".join(w["w"] for w in c["cw"][:12])
         wps = len(c["cw"]) / max(c["e"] - c["s"], 1)
-        title = (c["ai"] or {}).get("title") or (re.split(r"(?<=[.!?])\s", " ".join(w["w"] for w in c["cw"]))[0]
-                                                  if c["cw"] else "Untitled clip")[:70]
+        title = (c["ai"] or {}).get("title") or title_of(c["words"]) or (c["words"][0]["w"] if c["words"] else "Untitled clip")
+        init_sfx = auto_sfx({"start": c["s"], "end": c["e"], "peak": c["peak"], "words": c["words"]})
         db.ex("insert into clips(video_id,start,end,peak,ws,we,score,scores,reasons,words,title,template,layout,res,"
-              "crop_x,music,sfx_intro,sfx_peak,captions,status,render_status,created) "
-              "values(?,?,?,?,?,?,?,?,?,?,?,?,'stack',1080,0.5,?,'','',1,'candidate','none',?)",
+              "crop_x,music,sfx_intro,sfx_peak,captions,status,render_status,created,sfx,hook_zoom,emojis,censor) "
+              "values(?,?,?,?,?,?,?,?,?,?,?,?,'stack',1080,0.5,?,'whoosh.wav','sub_bass_drop.wav',1,'candidate','none',?,?,1,1,0)",
               (video_id, c["s"], c["e"], c["peak"], c["ws"], c["we"], round(c["final"], 4), db.dumps(comp),
                db.dumps(_reasons(c["peak"], comp, c["cw"], hooks, wps, "?" in first, c["ai"])),
-               db.dumps(c["words"]), title, tpl_default, music_default, db.now()))
+               db.dumps(c["words"]), title, tpl_default, music_default, db.now(), db.dumps(init_sfx)))
     db.ex("update videos set status='ready', progress=100, stage='', error=null where id=?", (video_id,))
     job.log(f"{len(chosen)} clips ranked.")
 
@@ -279,10 +315,37 @@ def analyze_video(job, video_id, p):
 # ---------------- captions for a clip ----------------
 def clip_words(clip):
     """Words inside the clip on the clip timeline, each remembering its index in the stored word list."""
-    words = json.loads(clip["words"])
+    raw = clip.get("words")
+    words = json.loads(raw) if isinstance(raw, str) else (raw or [])
     return [{"w": w["w"], "start": w["start"] - clip["start"], "end": w["end"] - clip["start"], "i": i}
             for i, w in enumerate(words)
             if w["start"] >= clip["start"] - 0.01 and w["end"] <= clip["end"] + 0.01]
+
+
+def auto_sfx(clip):
+    """Effects that make a clip hit harder: whoosh in, riser into the big moment, boom on it, pops on reaction words.
+    Times are on the video timeline (like start/end), so trimming never moves them off their moment."""
+    s, dur = clip["start"], clip["end"] - clip["start"]
+    peak = clip["peak"] - s
+    if not 0.5 < peak < dur - 0.3:
+        peak = dur * 0.4
+    out = [{"f": "whoosh.wav", "t": 0.0, "v": 0.5}]
+    if peak > 2:
+        out.append({"f": "riser.wav", "t": peak - 1.5, "v": 0.35})
+    out.append({"f": "boom.wav", "t": peak, "v": 0.8})
+    words = clip_words(clip)
+    toks = [re.sub(r"[^a-z0-9 ]", "", w["w"].lower()) for w in words]
+    last = -9.0
+    for i, w in enumerate(words):
+        said = " ".join(toks[i:i + 3])
+        if (any(said == h or said.startswith(h + " ") for h in HOOK_WORDS) and abs(w["start"] - peak) > 1.5
+                and w["start"] - last >= 2 and 0.3 < w["start"] < dur - 0.3):
+            out.append({"f": "pop.wav", "t": w["start"], "v": 0.6})
+            last = w["start"]
+            if sum(e["f"] == "pop.wav" for e in out) == 3:
+                break
+    return [dict(e, t=round(s + e["t"], 3)) for e in sorted(out, key=lambda e: e["t"])
+            if audiolib.resolve("sfx", e["f"])]
 
 
 def clip_cues(clip):
@@ -326,10 +389,15 @@ def get_track(job, clip, video):
 
 
 def get_cam(job, clip, video):
-    """Facecam box for the stacked layout (cached until the clip's start or end changes)."""
+    """Facecam box for the stacked layout (cached until the clip's start or end changes).
+    A box drawn by hand on the video wins over detection for all its clips."""
+    if video.get("cam_box"):
+        x, y, w, h = json.loads(video["cam_box"])
+        return {"cam": faces.fit_panel(x, y, w, h, x + w / 2, y + h / 2), "box": [x, y, w, h], "kind": "facecam",
+                "exact": True, "manual": True}
     if clip["cam"]:
         c = json.loads(clip["cam"])
-        if abs(c["start"] - clip["start"]) < 0.01 and abs(c["end"] - clip["end"]) < 0.01:
+        if "box" in c and abs(c["start"] - clip["start"]) < 0.01 and abs(c["end"] - clip["end"]) < 0.01:
             return c
     if job:
         job.check()
@@ -341,15 +409,48 @@ def get_cam(job, clip, video):
 
 def framing(clip, video):
     """What the browser preview needs to mimic the face-following crop or the stacked layout."""
-    if clip["layout"] == "stack":
+    if clip["layout"] in ("stack", "pip") or (clip.get("cam_pos") and str(clip["cam_pos"]).startswith("pip")):
         c = get_cam(None, clip, video)
         if c["kind"] != "camera":
-            return {"stack": True, "kind": c["kind"], "cam": c["cam"], "w": video["w"], "h": video["h"],
-                    "top": faces.TOP_SHARE, "found": 1.0 if c["cam"] else 0.0, "pts": []}
+            return {"stack": True, "pip": clip["layout"] == "pip" or str(clip.get("cam_pos", "")).startswith("pip"),
+                    "size": faces.PIP_SIZE, "ptop": faces.PIP_TOP,
+                    "kind": c["kind"], "cam": c["cam"], "box": c["box"], "w": video["w"], "h": video["h"],
+                    "top": faces.TOP_SHARE, "found": 1.0 if c["cam"] else 0.0, "pts": [], "manual": bool(c.get("manual")),
+                    "cam_zoom": float(clip.get("cam_zoom") or 1.0),
+                    "cam_shape": clip.get("cam_shape") or "rect",
+                    "cam_pos": clip.get("cam_pos") or "top",
+                    "cam_pos_x": float(clip.get("cam_pos_x") or 0.5),
+                    "cam_pos_y": float(clip.get("cam_pos_y") or 0.65),
+                    "banner_text": clip.get("banner_text") or "",
+                    "banner_style": clip.get("banner_style") or "white_box"}
     t = get_track(None, clip, video)
     room = max(video["w"] - t["cw"], 1)
     return {"found": t["found"], "cw": t["cw"], "w": video["w"], "h": video["h"],
             "pts": [[p[0], round(p[1] / room, 4)] for p in t["pts"]]}
+
+
+def _hd_part(job, c, v, info, track):
+    """Quick-copy videos: fetch just this clip in full quality and move the face boxes to its size.
+    Returns None (render from the quick copy) if the link no longer works."""
+    out = os.path.join(vdir(v["id"]), f"hd_{c['id']}_{c['start']:.2f}_{c['end']:.2f}.mp4")
+    job.log(f"Getting this part in {v['hd']}p...")
+    try:
+        download_section(job, v["source"], out, c["start"], c["end"], v["hd"], v["cookies"])
+        p = probe(which("ffprobe"), out)
+    except Cancelled:
+        raise
+    except Exception as e:
+        job.log(f"Couldn't get the full-quality part ({str(e)[:200]}). Using the quick copy instead.")
+        return None
+    k = p["w"] / v["w"]
+    if track:
+        track = dict(track)
+        for key in ("cam", "box"):
+            if track.get(key):
+                track[key] = [int(n * k) // 2 * 2 for n in track[key]]
+        if track.get("pts"):
+            track["pts"] = [[t, x * k] for t, x in track["pts"]]
+    return out, 0.0, c["end"] - c["start"], {**info, "w": p["w"], "h": p["h"], "fps": p["fps"]}, track
 
 
 def render(job, clip_id, p):
@@ -360,8 +461,14 @@ def render(job, clip_id, p):
     cues = clip_cues(c) if c["captions"] else []
     work = wdir(c["video_id"])
     ass = os.path.join(work, f"clip_{clip_id}.ass")
+    censor = bool(c["censor"]) if ("censor" in c and c["censor"] is not None) else False
+    emojis = bool(c["emojis"]) if ("emojis" in c and c["emojis"] is not None) else True
+    hook_zoom = bool(c["hook_zoom"]) if ("hook_zoom" in c and c["hook_zoom"] is not None) else True
+    banner_text = c.get("banner_text") or ""
+    banner_style = c.get("banner_style") or "white_box"
     with open(ass, "w", encoding="utf-8") as f:
-        f.write(captions.to_ass(cues, c["template"]))
+        f.write(captions.to_ass(cues, c["template"], censor=censor, emojis=emojis, hook_boost=True,
+                                banner_text=banner_text, banner_style=banner_style))
     out_dir = os.path.join(db.DATA, "exports")
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"clip_{clip_id}.mp4")
@@ -375,26 +482,44 @@ def render(job, clip_id, p):
     setp(0.01)
     track, layout = None, c["layout"]
     wide = v["w"] / v["h"] > 9 / 16 + 0.01
-    if layout == "stack" and wide:
+    if layout in ("stack", "pip") and wide:
         cam = get_cam(job, c, v)
-        job.log({"facecam": "Facecam found: stacked above the gameplay.", "camera": "Full camera shot: following the face.",
+        job.log({"facecam": "Facecam found: placed over the gameplay." if layout == "pip" else "Facecam found: stacked above the gameplay.", "camera": "Full camera shot: following the face.",
                  "none": "No facecam: showing the whole gameplay."}[cam["kind"]])
         if cam["kind"] == "camera":
             layout = "follow"
         else:
-            track = {"cam": cam["cam"]}
+            track = {"cam": cam["cam"], "box": cam["box"]}
     if layout == "follow" and wide:
         track = get_track(job, c, v)
         job.log(f"Face found in {track['found']:.0%} of the clip.")
+    src, start, end = clip_source(c, v), c["start"], c["end"]
+    if v["hd"] and not c["src"]:
+        src, start, end, info, track = _hd_part(job, c, v, info, track) or (src, start, end, info, track)
     setp(0.12)
     dur = c["end"] - c["start"]
     sfx = []
     path = audiolib.resolve("sfx", c["sfx_intro"])
     if path:
         sfx.append((path, 0.0, 0.7))
+    for e in json.loads(c["sfx"] or "[]"):                 # placed effects, stored on the video timeline
+        path = audiolib.resolve("sfx", e["f"])
+        if path and c["start"] <= e["t"] < c["end"]:
+            sfx.append((path, e["t"] - c["start"], e["v"]))
     music = audiolib.resolve("music", c["music"])
     job.log(f"Rendering {dur:.0f}s clip at {RES[c['res']][0]}x{RES[c['res']][1]}...")
-    render_clip(job, ffmpeg, clip_source(c, v), info, c["start"], c["end"], ass, out, layout, c["crop_x"],
+    if c.get("sfx_peak"):
+        p_peak = audiolib.resolve("sfx", c["sfx_peak"])
+        if p_peak:
+            peak_offset = max(0.5, min(dur - 0.5, c["peak"] - c["start"]))
+            if not any(abs(at - peak_offset) < 0.8 for _, at, _ in sfx):
+                sfx.append((p_peak, peak_offset, 0.85))
+    render_clip(job, ffmpeg, src, info, start, end, ass, out, layout, c["crop_x"],
                 res=c["res"], music=music, music_vol=0.18, duck=True, sfx=sfx, track=track,
-                on_progress=lambda f: setp(0.12 + 0.88 * f))
+                hook_zoom=hook_zoom, on_progress=lambda f: setp(0.12 + 0.88 * f),
+                cam_zoom=float(c.get("cam_zoom") or 1.0),
+                cam_shape=c.get("cam_shape") or "rect",
+                cam_pos=c.get("cam_pos") or "top",
+                cam_pos_x=float(c.get("cam_pos_x") or 0.5),
+                cam_pos_y=float(c.get("cam_pos_y") or 0.65))
     db.ex("update clips set render_status='done', render_progress=100, render_path=? where id=?", (out, clip_id))

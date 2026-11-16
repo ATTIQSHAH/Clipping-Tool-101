@@ -35,6 +35,32 @@ _STARTER = {
     "hit.wav": ["-f", "lavfi", "-i", "aevalsrc=sin(2*PI*55*t)*exp(-6*t)+0.4*sin(2*PI*110*t)*exp(-9*t):d=0.6:s=44100"],
     "ding.wav": ["-f", "lavfi", "-i", "aevalsrc=0.6*sin(2*PI*1320*t)*exp(-5*t):d=0.9:s=44100"],
     "pop.wav": ["-f", "lavfi", "-i", "aevalsrc=0.8*sin(2*PI*600*t)*exp(-30*t):d=0.25:s=44100"],
+    "boom.wav": ["-f", "lavfi", "-i", "aevalsrc=0.9*sin(2*PI*45*t)*exp(-3.5*t)+0.35*(random(0)*2-1)*exp(-25*t):d=1.4:s=44100"],
+    "riser.wav": ["-f", "lavfi", "-i", "aevalsrc=0.5*(t/1.5)*sin(2*PI*(200*t+466*t*t))+0.25*(t/1.5)*(t/1.5)*(random(0)*2-1)"
+                  ":d=1.5:s=44100"],
+    "bass_drop.wav": ["-f", "lavfi", "-i", "aevalsrc=0.9*sin(2*PI*(150*t-45*t*t))*exp(-1.2*t):d=1.2:s=44100"],
+    "siren.wav": ["-f", "lavfi", "-i", "aevalsrc=0.4*sin(2*PI*(900*t-31.83*cos(2*PI*1.5*t))):d=2:s=44100",
+                  "-af", "afade=t=in:d=0.15,afade=t=out:st=1.6:d=0.4"],
+    "glitch.wav": ["-f", "lavfi", "-i", "aevalsrc=0.6*(random(0)*2-1)*gt(sin(2*PI*14*t)\\,0.3)*sin(2*PI*300*t):d=0.5:s=44100"],
+    "camera_click.wav": ["-f", "lavfi", "-i", "aevalsrc=0.8*(random(0)*2-1)*(exp(-80*t)+0.7*gte(t\\,0.09)*exp(-80*(t-0.09)))"
+                         ":d=0.3:s=44100"],
+    "heartbeat.wav": ["-f", "lavfi", "-i", "aevalsrc=0.9*sin(2*PI*50*t)*(exp(-20*mod(t\\,0.8))+0.7*gte(t\\,0.2)*exp(-20*mod(t-0.2\\,0.8)))"
+                      ":d=2.4:s=44100"],
+    "sub_bass_drop.wav": [
+        "-f", "lavfi", "-i",
+        "aevalsrc=0.9*sin(2*PI*(75-25*t)*t)*exp(-1.5*t)+0.3*sin(2*PI*40*t)*exp(-1.2*t):d=1.8:s=44100",
+        "-af", "lowpass=f=120,volume=2.2"
+    ],
+    "vine_boom.wav": [
+        "-f", "lavfi", "-i",
+        "aevalsrc=0.95*sin(2*PI*(65-20*t)*t)*exp(-2.5*t)+0.5*sin(2*PI*35*t)*exp(-2.0*t):d=1.2:s=44100",
+        "-af", "bass=g=12:f=60,volume=2.5"
+    ],
+    "record_scratch.wav": [
+        "-f", "lavfi", "-i",
+        "anoisesrc=d=0.4:c=brown:a=0.8",
+        "-af", "bandpass=f=1800:width_type=h:w=900,afade=t=out:st=0.15:d=0.25,volume=1.8"
+    ]
 }
 
 

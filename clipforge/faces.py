@@ -125,30 +125,95 @@ def write_sendcmd(pts, path, out_fps=30):
     return _even(xs[0])
 
 
-TOP_SHARE = 0.4          # stacked layout: facecam gets the top 40% of the 9:16 frame, gameplay the rest
+TOP_SHARE = 0.4                        # stacked layout: facecam gets the top 40% of the 9:16 frame, gameplay the rest
+PIP_SIZE, PIP_TOP = 0.5, 0.03          # pip layout: facecam box width and top gap, as share of the frame
+STILL = 10                             # pixel brightness spread (0-255) below which a spot counts as still
+MOVES = 20                             # a live face changes this much frame to frame (real cams 28-40, logos 12-15)
+
+
+def cam_rect(frames, cx, cy, fw):
+    """Edges of the facecam overlay around a face, in frame px, as (x0, y0, x1, y1), or None if unclear.
+    The streamer's room barely changes while the gameplay around it keeps moving, so the overlay is the
+    still area that surrounds the face. Fails (None) on borderless or green-screen cams and frozen gameplay."""
+    import cv2
+    if len(frames) < 5:
+        return None
+    fh, fwid = frames.shape[1:]
+    still = (frames.std(axis=0) < STILL).astype(np.uint8)
+    still = cv2.morphologyEx(still, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))   # break thin links to static HUD bits
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(still, connectivity=4)
+    r = fw / 2
+    wx0, wx1 = int(max(cx - 3 * r, 0)), int(min(cx + 3 * r, fwid))
+    wy0, wy1 = int(max(cy - 3 * r, 0)), int(min(cy + 2 * r, fh))
+    near = labels[wy0:wy1, wx0:wx1]
+    ids, counts = np.unique(near[near > 0], return_counts=True)
+    keep = [i for i, c in zip(ids, counts) if c >= 0.05 * near.size]
+    if not keep:
+        return None
+    x0, y0 = min(stats[i, 0] for i in keep), min(stats[i, 1] for i in keep)
+    x1 = max(stats[i, 0] + stats[i, 2] for i in keep)
+    y1 = max(stats[i, 1] + stats[i, 3] for i in keep)
+    x0, y0, x1, y1 = min(x0, cx - r), min(y0, cy - r), max(x1, cx + r), max(y1, cy + r)
+    w, h = x1 - x0, y1 - y0
+    if not (0.6 <= w / h <= 2.6) or w * h > 0.35 * fwid * fh or w > 8 * fw:
+        return None                                       # merged with other static stuff; don't trust it
+    return x0 + 1, y0 + 1, x1 - 1, y1 - 1                 # 1px inside so no gameplay line leaks in
 
 
 def find_facecam(ffmpeg, src, W, H, start, end, out_w=1080, out_h=1920):
-    """Gaming streams: find a fixed facecam overlay. Returns {'cam': [x, y, w, h] | None, 'kind': ...} in source px.
+    """Gaming streams: find a fixed facecam overlay. Returns {'cam': [x, y, w, h] | None, 'box': ..., 'kind': ...}
+    in source px. 'box' is the whole overlay (pip layout); 'cam' is the part of it that fits the stacked top panel.
     kind 'facecam' = small steady face (overlay), 'camera' = big face (talking head, use follow instead), 'none'."""
-    frames, scale = _read_frames(ffmpeg, src, start, end, W, H, fps=1)
+    frames, scale = _read_frames(ffmpeg, src, start, end, W, H, fps=1, sw=1024)   # small facecams need the detail
     det = _detector()
-    hits = []
+    groups, big = [], []                                  # each steady face: [(cx, cy, w), ...] in analysis px
     for g in frames:
         min_face = max(16, int(g.shape[1] * 0.025))
-        faces = det.detectMultiScale(g, scaleFactor=1.1, minNeighbors=6, minSize=(min_face, min_face))
-        if len(faces):
-            x, y, w, h = max(faces, key=lambda f: f[2])
-            hits.append(((x + w / 2) / scale, (y + h / 2) / scale, w / scale))
-    if len(frames) == 0 or len(hits) < max(2, 0.3 * len(frames)):
-        return {"cam": None, "kind": "none"}
-    cx, cy, fw = (float(np.median([h[i] for h in hits])) for i in range(3))
-    if fw > 0.22 * W:
-        return {"cam": None, "kind": "camera"}
-    aspect = out_w / (out_h * TOP_SHARE)                   # shape of the top panel
-    cw = min(fw * 3.6, W * 0.5)
-    ch = min(cw / aspect, H)
-    cw = ch * aspect
-    x = min(max(cx - cw / 2, 0), W - cw)
-    y = min(max(cy - ch * 0.45, 0), H - ch)                # face a little above the panel centre
-    return {"cam": [_even(x), _even(y), _even(cw), _even(ch)], "kind": "facecam"}
+        found = det.detectMultiScale(g, scaleFactor=1.1, minNeighbors=6, minSize=(min_face, min_face))
+        if len(found):
+            big.append(max(w for _, _, w, _ in found))
+        for x, y, w, h in found:
+            f = (x + w / 2, y + h / 2, w)
+            grp = next((gr for gr in groups if abs(gr[0][0] - f[0]) < 0.6 * w and abs(gr[0][1] - f[1]) < 0.6 * w), None)
+            grp.append(f) if grp else groups.append([f])
+    groups = sorted((gr for gr in groups if len(gr) >= max(2, 0.6 * len(frames))), key=len, reverse=True)   # real cams: 75-100%; game false hits: <45%
+    pick, rect = None, None
+    camera = len(big) >= max(2, 0.3 * len(frames)) and np.median(big) / scale > 0.22 * W   # talking head, may wander
+    for gr in groups:                                     # a facecam sits in a still box; an IRL or game face doesn't
+        fx, fy, ff = (float(np.median([h[i] for h in gr])) for i in range(3))
+        x0, y0 = int(max(fx - ff / 2, 0)), int(max(fy - ff / 2, 0))
+        if frames[:, y0:y0 + int(ff), x0:x0 + int(ff)].std(axis=0).mean() < MOVES:
+            continue                                      # a logo or still picture, not a person
+        if ff / scale > 0.22 * W:
+            camera = True
+            continue
+        rect = cam_rect(frames, fx, fy, ff)
+        if rect or pick is None:
+            pick = (fx, fy, ff)
+        if rect:
+            break
+    if pick is None:
+        if camera:
+            return {"cam": None, "box": None, "kind": "camera"}
+        cw, ch = _even(W * 0.28), _even(H * 0.30)
+        x, y = _even(W - cw - 20), _even(20)
+        return {"cam": [x, y, cw, ch], "box": [x, y, cw, ch], "kind": "facecam", "exact": False}
+    fx, fy, ff = pick
+    cx, cy, fw = fx / scale, fy / scale, ff / scale
+    if rect:
+        bx, by = rect[0] / scale, rect[1] / scale
+        bw, bh = (rect[2] - rect[0]) / scale, (rect[3] - rect[1]) / scale
+    else:                                                 # guess the overlay from the face size
+        bw, bh = min(fw * 3.6, W * 0.5), min(fw * 2.2, H)
+        bx, by = min(max(cx - bw / 2, 0), W - bw), min(max(cy - bh * 0.45, 0), H - bh)
+    return {"cam": fit_panel(bx, by, bw, bh, cx, cy, out_w, out_h),
+            "box": [_even(bx), _even(by), _even(bw), _even(bh)], "kind": "facecam", "exact": bool(rect)}
+
+
+def fit_panel(bx, by, bw, bh, cx, cy, out_w=1080, out_h=1920):
+    """The part of the overlay box (around the face at cx, cy) that fills the stacked layout's top panel."""
+    aspect = out_w / (out_h * TOP_SHARE)
+    cw, ch = (bh * aspect, bh) if bw / bh > aspect else (bw, bw / aspect)
+    x = min(max(cx - cw / 2, bx), bx + bw - cw)
+    y = min(max(cy - ch * 0.45, by), by + bh - ch)       # face a little above the panel centre
+    return [_even(x), _even(y), _even(cw), _even(ch)]

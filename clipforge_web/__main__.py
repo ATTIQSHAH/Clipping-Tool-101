@@ -1,6 +1,32 @@
 import os, shutil, subprocess, sys, threading, webbrowser
 import uvicorn
-#hello
+
+# Suppress black console windows for all child processes (ffmpeg, yt-dlp, ffprobe) on Windows
+if os.name == "nt" and not getattr(subprocess, "_clipforge_silent_applied", False):
+    _RealPopen = subprocess.Popen
+
+    class _SilentPopen(_RealPopen):
+        def __init__(self, *args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args")
+            is_browser = False
+            if cmd and isinstance(cmd, (list, tuple)) and len(cmd) > 0:
+                c0 = str(cmd[0]).lower()
+                if "msedge" in c0 or "chrome" in c0:
+                    is_browser = True
+            if not is_browser:
+                if "creationflags" not in kwargs:
+                    kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+                else:
+                    kwargs["creationflags"] |= subprocess.CREATE_NO_WINDOW
+                if "startupinfo" not in kwargs:
+                    si = subprocess.STARTUPINFO()
+                    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    si.wShowWindow = 0
+                    kwargs["startupinfo"] = si
+            super().__init__(*args, **kwargs)
+
+    subprocess.Popen = _SilentPopen
+    subprocess._clipforge_silent_applied = True
 
 def open_window(url):
     """Open ClipForge in its own app-style window (no browser tabs) using Edge or Chrome; else the normal browser."""

@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 *.zip
 .env
+build/
+dist/
+cookies.txt
+*.db
+*.log

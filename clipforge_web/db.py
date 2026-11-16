@@ -1,7 +1,10 @@
 """SQLite storage (single file, no server needed)."""
-import json, os, sqlite3, threading, time
+import json, os, shutil, sqlite3, sys, threading, time
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if getattr(sys, "frozen", False):
+    ROOT = os.path.dirname(sys.executable)
+else:
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.environ.get("CLIPFORGE_DATA") or os.path.join(ROOT, "data")
 _lock = threading.RLock()
 _conn = None
@@ -12,13 +15,17 @@ create table if not exists clients(
 create table if not exists videos(
   id integer primary key, title text, source text, path text, status text, error text,
   duration real, w integer, h integer, fps real, size integer, has_audio integer,
-  info_path text, curve text, created real, client_id integer, kind text, progress real default 0, stage text default '');
+  info_path text, curve text, created real, client_id integer, kind text, progress real default 0, stage text default '',
+  hd integer default 0, cookies text, cam_box text);
 create table if not exists clips(
   id integer primary key, video_id integer, start real, end real, peak real, ws real, we real,
   score real, scores text, reasons text, words text, title text,
   template text, layout text, res integer, crop_x real, music text, sfx_intro text, sfx_peak text,
   captions integer, status text, render_status text, render_path text, created real,
-  render_progress real default 0, src text, track text, downloaded integer default 0, stream_offset real default 0, cam text);
+  render_progress real default 0, src text, track text, downloaded integer default 0, stream_offset real default 0, cam text,
+  sfx text, hook_zoom integer default 1, emojis integer default 1, censor integer default 0,
+  cam_zoom real default 1.0, cam_shape text default 'rect', cam_pos text default 'top',
+  cam_pos_x real default 0.5, cam_pos_y real default 0.65, banner_text text default '', banner_style text default 'white_box');
 create table if not exists jobs(
   id integer primary key, type text, ref_id integer, params text, status text,
   log text default '', error text, created real, started real, finished real);
@@ -26,8 +33,35 @@ create table if not exists settings(key text primary key, value text);
 """
 
 MIGRATE = {
-    "videos": [("client_id", "integer"), ("kind", "text"), ("progress", "real default 0"), ("stage", "text default ''")],
-    "clips": [("render_progress", "real default 0"), ("src", "text"), ("track", "text"), ("downloaded", "integer default 0"), ("stream_offset", "real default 0"), ("cam", "text")],
+    "videos": [
+        ("hd", "integer default 0"),
+        ("cookies", "text"),
+        ("client_id", "integer"),
+        ("kind", "text"),
+        ("progress", "real default 0"),
+        ("stage", "text default ''"),
+        ("cam_box", "text"),
+    ],
+    "clips": [
+        ("render_progress", "real default 0"),
+        ("src", "text"),
+        ("track", "text"),
+        ("downloaded", "integer default 0"),
+        ("stream_offset", "real default 0"),
+        ("cam", "text"),
+        ("sfx", "text"),
+        ("hook_zoom", "integer default 1"),
+        ("emojis", "integer default 1"),
+        ("censor", "integer default 0"),
+        ("sfx_peak", "text default ''"),
+        ("cam_zoom", "real default 1.0"),
+        ("cam_shape", "text default 'rect'"),
+        ("cam_pos", "text default 'top'"),
+        ("cam_pos_x", "real default 0.5"),
+        ("cam_pos_y", "real default 0.65"),
+        ("banner_text", "text default ''"),
+        ("banner_style", "text default 'white_box'"),
+    ],
 }
 
 
@@ -35,7 +69,16 @@ def conn():
     global _conn
     if _conn is None:
         os.makedirs(DATA, exist_ok=True)
-        _conn = sqlite3.connect(os.path.join(DATA, "clipforge.db"), check_same_thread=False)
+        db_file = os.path.join(DATA, "clipforge.db")
+        # Migrate existing db if present in _internal/data
+        if not os.path.exists(db_file) and getattr(sys, "frozen", False):
+            old_db = os.path.join(ROOT, "_internal", "data", "clipforge.db")
+            if os.path.exists(old_db):
+                try:
+                    shutil.copy2(old_db, db_file)
+                except Exception:
+                    pass
+        _conn = sqlite3.connect(db_file, check_same_thread=False)
         _conn.row_factory = sqlite3.Row
         _conn.executescript(SCHEMA)
         for table, cols in MIGRATE.items():                     # upgrade databases from older versions

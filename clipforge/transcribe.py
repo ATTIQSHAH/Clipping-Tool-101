@@ -2,6 +2,7 @@
 {"words": [{"w": "hello", "start": 0.12, "end": 0.40}, ...]}"""
 import json
 import os
+import subprocess
 import threading
 import wave
 
@@ -14,14 +15,30 @@ _lock = threading.Lock()      # the web app and live mode may transcribe at the 
 
 
 def _load_wav(path):
-    # Window files are 16 kHz mono 16-bit WAVs, so no extra decoder (PyAV) is needed.
-    with wave.open(path, "rb") as w:
-        data = w.readframes(w.getnframes())
-    return np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+    # If already a valid WAV file, read directly
+    try:
+        with wave.open(path, "rb") as w:
+            data = w.readframes(w.getnframes())
+            if len(data):
+                return np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+    except Exception:
+        pass
+
+    # Extract 16 kHz mono audio using ffmpeg for mp4, mkv, webm, etc.
+    from .util import which
+    ffmpeg = which("ffmpeg")
+    cmd = [ffmpeg, "-v", "error", "-i", path, "-ar", "16000", "-ac", "1", "-f", "s16le", "-"]
+    raw = subprocess.run(cmd, capture_output=True).stdout
+    return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-def transcribe_file(wav, model="small", device="cpu", compute="int8", language=None, on_progress=None):
+def transcribe_file(wav, model="small", device="cpu", compute="int8", language=None, on_progress=None,
+                    model_size=None, compute_type=None, should_stop=None):
     global _model, _loaded
+    if model_size:
+        model = model_size
+    if compute_type:
+        compute = compute_type
     if DEVICE:
         device, compute = DEVICE, ("int8" if DEVICE == "cpu" else "float16")
     with _lock:
@@ -36,6 +53,8 @@ def transcribe_file(wav, model="small", device="cpu", compute="int8", language=N
         segs, _ = _model.transcribe(audio, word_timestamps=True, vad_filter=True,
                                     language=language, condition_on_previous_text=False)
         for s in segs:
+            if should_stop:
+                should_stop()
             if on_progress:
                 on_progress(min(1.0, s.end / total))
             for w in (s.words or []):

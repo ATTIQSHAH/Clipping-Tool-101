@@ -1,12 +1,15 @@
 """Clip boundaries (snap to sentence starts/ends) and a simple speech score."""
 import math
 
-HOOK_WORDS = ["no way", "what the", "oh my", "crazy", "insane", "bro", "dude", "wait", "bruh", "omg",
-              "wtf", "nah", "stop", "scream", "never", "can't believe", "unbelievable", "let's go", "yo",
-              # GTA / gaming reactions
-              "wasted", "busted", "oh no", "get out", "the cops", "five stars", "5 stars", "glitch", "crashed",
-              "exploded", "what just happened", "are you serious", "no no no", "oh my god", "run run", "go go go",
-              "i'm dead", "we're dead", "clip that", "let him cook"]
+HOOK_WORDS = [
+    "no way", "what the", "oh my", "crazy", "insane", "bro", "dude", "wait", "bruh", "omg",
+    "wtf", "nah", "stop", "scream", "never", "can't believe", "unbelievable", "let's go", "yo",
+    # GTA / gaming reactions & slang
+    "wasted", "busted", "oh no", "get out", "the cops", "five stars", "5 stars", "glitch", "crashed",
+    "exploded", "what just happened", "are you serious", "no no no", "oh my god", "run run", "go go go",
+    "i'm dead", "we're dead", "clip that", "let him cook",
+    "chat is this real", "watch this", "clutch", "he has no idea", "aimbot", "headshot", "hacker", "rage quit", "lock in", "on god", "ggs"
+]
 SENT = (".", "?", "!")
 
 
@@ -40,12 +43,30 @@ def snap(words, t0, t1, min_len, max_len, duration, fps):
             k = max((k for k in range(i, j + 1) if words[k]["end"] - s <= max_len and _ends_sentence(words, k)),
                     default=None)
             e = (words[k]["end"] + 0.25) if k is not None else s + max_len
+        if e - s < min_len:                                 # little speech (quiet gameplay): keep the asked window
+            s, e = min(s, t0), max(e, t1, s + min_len)
     else:
         s, e = t0, t1
     s, e = max(0.0, s), min(duration, e)
     s = math.floor(s * fps) / fps                           # land on the frame grid
     e = math.ceil(e * fps) / fps
     return s, min(e, duration)
+
+
+def title_of(words, n=70):
+    """A whole sentence from the clip as its title: starts with a capital, 3+ words, hook words win."""
+    sents, cur = [], []
+    for i, w in enumerate(words):
+        cur.append(w["w"])
+        if _ends_sentence(words, i):
+            sents.append(" ".join(cur).strip(" ,"))
+            cur = []
+    ok = [t for t in sents if t[:1].isupper() and len(t.split()) >= 3] or [t for t in sents if len(t.split()) >= 3] or sents
+    if not ok:
+        return ""
+    best = max(ok, key=lambda t: (any(h in t.lower() for h in HOOK_WORDS), min(len(t.split()), 12)))
+    best = best[:1].upper() + best[1:]
+    return best if len(best) <= n else best[:n].rsplit(" ", 1)[0] + "..."
 
 
 def text_score(words, dur):
@@ -57,5 +78,3 @@ def text_score(words, dur):
     s += 0.2 if "?" in first else 0.0
     s += min(len(words) / max(dur, 1) / 3.0, 1.0) * 0.3
     return min(s, 1.0)
-
-

@@ -1,6 +1,44 @@
-"""Word-level captions -> ASS (styles, active-word highlight)."""
+"""Word-level captions -> ASS (styles, active-word highlight, hook effects, emojis, censoring)."""
+import re
 
 SENT = (".", "?", "!")
+
+EMOJI_TRIGGERS = {
+    ("fire", "lit", "hot", "cook", "insane", "burn"): "🔥",
+    ("dead", "die", "died", "kill", "killed", "rip", "skull", "wasted"): "💀",
+    ("cops", "police", "busted", "siren", "stars"): "🚨",
+    ("money", "rich", "cash", "paid", "bag", "dollar", "crypto"): "💰",
+    ("no way", "omg", "what", "shocked", "screaming", "crazy", "bruh", "wait"): "😱",
+    ("win", "won", "clutch", "champion", "gg", "first"): "🏆",
+    ("explode", "crashed", "boom", "bang", "glitch", "crash"): "💥",
+    ("look", "see", "watch", "peep", "eyes"): "👀",
+    ("fast", "speed", "run", "lightning"): "⚡",
+    ("goat", "king", "queen", "best"): "👑",
+    ("game", "gaming", "play", "player"): "🎮",
+    ("headshot", "aim", "target", "shot"): "🎯"
+}
+
+PROFANITIES = {
+    "fuck", "fucking", "fucked", "fucker", "shit", "shitting", "bitch", "bitches",
+    "asshole", "dick", "pussy", "bastard", "cunt", "nigger", "nigga"
+}
+
+
+def censor_word(w):
+    clean = re.sub(r"[^\w]", "", w.lower())
+    if clean in PROFANITIES:
+        punct = "".join(c for c in w if not c.isalnum())
+        return "*" * len(clean) + punct
+    return w
+
+
+def get_emoji_for_phrase(words):
+    text = " ".join(w["w"].lower() for w in words)
+    for triggers, emoji in EMOJI_TRIGGERS.items():
+        for trg in triggers:
+            if re.search(r"\b" + re.escape(trg) + r"\b", text):
+                return emoji
+    return ""
 
 
 def _bgr(hexcol, alpha=0):
@@ -67,11 +105,21 @@ def _esc(s):
     return s.replace("{", "(").replace("}", ")").replace("\\", "")
 
 
-def to_ass(cues, template="yellow_pop", width=1080, height=1920):
+def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, emojis=True, hook_boost=True,
+           banner_text="", banner_style="white_box"):
     t = TEMPLATES.get(template) or TEMPLATES["yellow_pop"]
     style_box = 3 if t["box"] else 1
     back = _bgr("#000000", 90 if t["box"] else 128)
     outc = _bgr(t["outline"], 90) if t["box"] else _bgr(t["outline"])
+    
+    # Banner styles for top hook headline
+    if banner_style == "dark_box":
+        banner_def = "Style: Banner,Arial,52,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,16,6,8,80,80,110,1\n"
+    elif banner_style == "neon":
+        banner_def = "Style: Banner,Arial,54,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,10,8,80,80,110,1\n"
+    else:  # white_box (standard TikTok / Instagram card)
+        banner_def = "Style: Banner,Arial,52,&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,16,6,8,80,80,110,1\n"
+
     head = (
         "[Script Info]\nScriptType: v4.00+\nWrapStyle: 0\nScaledBorderAndShadow: yes\n"
         f"PlayResX: {width}\nPlayResY: {height}\n\n[V4+ Styles]\n"
@@ -79,28 +127,54 @@ def to_ass(cues, template="yellow_pop", width=1080, height=1920):
         "Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,"
         "MarginR,MarginV,Encoding\n"
         f"Style: Main,{t['font']},{t['size']},{_bgr(t['primary'])},{_bgr(t['primary'])},{outc},{back},"
-        f"{-1 if t['bold'] else 0},0,0,0,100,100,0,0,{style_box},{t['ow']},{t['shadow']},2,60,60,{t['mv']},1\n\n"
-        "[Events]\nFormat: Layer,Start,End,Name,Style,MarginL,MarginR,MarginV,Effect,Text\n"
+        f"{-1 if t['bold'] else 0},0,0,0,100,100,0,0,{style_box},{t['ow']},{t['shadow']},2,60,60,{t['mv']},1\n"
+        + (banner_def if banner_text and banner_style != "none" else "") +
+        "\n[Events]\nFormat: Layer,Start,End,Name,Style,MarginL,MarginR,MarginV,Effect,Text\n"
     )
-    pop = r"{\fscx82\fscy82\t(0,90,\fscx100\fscy100)}" if t["pop"] else ""
     glow = r"{\blur5}" if t["glow"] else ""
     sa = t["scale_active"]
     lines = []
+    if banner_text and banner_style != "none":
+        clean_banner = _esc(banner_text).strip()
+        lines.append(f"Dialogue: 1,0:00:00.00,9:59:59.00,Banner,,0,0,0,,{{\\an8}}{clean_banner}")
     for cue in cues:
-        ws = [(_esc(w["w"]).upper() if t["upper"] else _esc(w["w"])) for w in cue["words"]]
-        for i, w in enumerate(cue["words"]):
+        raw_words = cue["words"]
+        processed_words = []
+        for w in raw_words:
+            word_txt = censor_word(w["w"]) if censor else w["w"]
+            clean_txt = _esc(word_txt).upper() if t["upper"] else _esc(word_txt)
+            processed_words.append(clean_txt)
+        
+        # Check for contextual emoji
+        phrase_emoji = get_emoji_for_phrase(raw_words) if emojis else ""
+        if phrase_emoji and processed_words:
+            processed_words[-1] = f"{processed_words[-1]} {phrase_emoji}"
+            
+        for i, w in enumerate(raw_words):
             s = cue["start"] if i == 0 else w["start"]
-            e = cue["words"][i + 1]["start"] if i + 1 < len(ws) else cue["end"]
+            e = raw_words[i + 1]["start"] if i + 1 < len(processed_words) else cue["end"]
+            
+            # Attention grabber for first 3-6s: extra pop + bounce
+            is_hook = hook_boost and s < 4.5
+            if is_hook:
+                pop = r"{\fscx112\fscy112\t(0,100,\fscx100\fscy100)}"
+            else:
+                pop = r"{\fscx82\fscy82\t(0,90,\fscx100\fscy100)}" if t["pop"] else ""
+                
             if t["mode"] == "word":
-                body = ws[i]
+                body = processed_words[i]
             else:
                 parts = []
-                for j, txt in enumerate(ws):
+                for j, txt in enumerate(processed_words):
                     on = j == i
-                    tag = f"\\c{_bgr(t['active'] if on else t['primary'])}"
-                    if sa:
-                        tag += f"\\fscx{sa if on else 100}\\fscy{sa if on else 100}"
+                    act_col = "#FF3366" if (is_hook and on and t["active"] == "#FFFFFF") else (t["active"] if on else t["primary"])
+                    tag = f"\\c{_bgr(act_col)}"
+                    cur_scale = sa if on else 100
+                    if is_hook and on:
+                        cur_scale = max(cur_scale, 115)
+                    if cur_scale != 100:
+                        tag += f"\\fscx{cur_scale}\\fscy{cur_scale}"
                     parts.append(f"{{{tag}}}{txt}")
                 body = " ".join(parts)
-            lines.append(f"Dialogue: 0,{_ts(s)},{_ts(e)},,Main,0,0,0,,{glow}{pop if (i == 0 or t['mode'] == 'word') else ''}{body}")
+            lines.append(f"Dialogue: 0,{_ts(s)},{_ts(e)},,Main,0,0,0,,{glow}{pop if (i == 0 or t['mode'] == 'word' or is_hook) else ''}{body}")
     return head + "\n".join(lines) + "\n"
