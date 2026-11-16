@@ -41,7 +41,8 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
                 cam_zoom=1.0, cam_shape="rect", cam_pos="top", cam_pos_x=0.5, cam_pos_y=0.65):
     W, H = RES[res]
     w, h = info["w"], info["h"]
-    dur = end - start
+    s = max(0.0, float(start))
+    dur = max(0.5, float(end) - s)
     tmp = os.path.dirname(os.path.abspath(ass_path))
     ass = os.path.basename(ass_path)  # relative name avoids Windows 'C:' escaping problems
     
@@ -128,7 +129,7 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         x = int((w - cw) * min(max(crop_x, 0), 1)) // 2 * 2
         fc = f"[0:v]crop={cw}:{h}:{x}:0,scale={W}:{H}:flags=lanczos,setsar=1{zoom},ass={ass}[v]"
     af, extra_in = _audio_graph(music, music_vol, duck, sfx, 1)
-    cmd = ([ffmpeg, "-nostdin", "-y", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", os.path.abspath(src)] + extra_in +
+    cmd = ([ffmpeg, "-nostdin", "-y", "-ss", f"{s:.3f}", "-t", f"{dur:.3f}", "-i", os.path.abspath(src)] + extra_in +
            ["-filter_complex", fc + ";" + af, "-map", "[v]", "-map", "[aout]"] + ENC[encoder] +
            ["-r", str(fps), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
             "-t", f"{dur:.3f}", "-movflags", "+faststart", os.path.abspath(out_path)])

@@ -47,10 +47,15 @@ def snap(words, t0, t1, min_len, max_len, duration, fps):
             s, e = min(s, t0), max(e, t1, s + min_len)
     else:
         s, e = t0, t1
-    s, e = max(0.0, s), min(duration, e)
+    s = max(0.0, min(float(duration) - 1.0, float(s)))
+    e = min(float(duration), max(s + 1.0, float(e)))
     s = math.floor(s * fps) / fps                           # land on the frame grid
     e = math.ceil(e * fps) / fps
-    return s, min(e, duration)
+    if e <= s:
+        e = min(float(duration), s + max(1.0, 1.0 / fps))
+        if e <= s:
+            s = max(0.0, e - 1.0)
+    return s, e
 
 
 def title_of(words, n=70):

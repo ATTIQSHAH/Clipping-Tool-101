@@ -232,8 +232,11 @@ def analyze_video(job, video_id, p):
     if not cands:
         raise RuntimeError("No exciting moments stood out in this video. Try a shorter clip length.")
     for c in cands:
-        c["ws"], c["we"] = max(0.0, c["start"] - pad), min(dur, c["end"] + pad)
-    covered = sum(c["we"] - c["ws"] for c in cands)
+        c["start"] = max(0.0, min(dur - 2.0, c["start"]))
+        c["end"] = min(dur, max(c["start"] + 2.0, c["end"]))
+        c["ws"] = max(0.0, min(dur - 2.0, c["start"] - pad))
+        c["we"] = min(dur, max(c["ws"] + 2.0, c["end"] + pad))
+    covered = sum(max(0.0, c["we"] - c["ws"]) for c in cands)
 
     # 3) transcribe: once for the whole video if the clips cover most of it, otherwise only the good moments
     prog(video_id, 20, "Reading what is said")
@@ -255,11 +258,12 @@ def analyze_video(job, video_id, p):
             job.check()
             import time; time.sleep(0.01)
             prog(video_id, 22 + 58 * i / len(cands), f"Reading what is said ({i} of {len(cands)})")
+            win_dur = max(2.0, c["we"] - c["ws"])
             key = f"win_{int(c['ws'] * 1000)}_{int(c['we'] * 1000)}"
             wav, tj = os.path.join(work, key + ".wav"), os.path.join(work, key + ".json")
             if not os.path.exists(tj):
                 if not os.path.exists(wav):
-                    job.run([ffmpeg, "-nostdin", "-y", "-ss", f"{c['ws']:.3f}", "-t", f"{c['we'] - c['ws']:.3f}", "-i", src,
+                    job.run([ffmpeg, "-nostdin", "-y", "-ss", f"{c['ws']:.3f}", "-t", f"{win_dur:.3f}", "-i", src,
                              "-vn", "-ac", "1", "-ar", "16000", wav])
                 with open(tj, "w", encoding="utf-8") as f:
                     json.dump(transcribe_file(wav, model, device, compute, p.get("language") or None), f)
