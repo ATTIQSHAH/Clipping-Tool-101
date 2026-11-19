@@ -18,7 +18,7 @@ CLIP_FIELDS = {
     "title", "template", "layout", "res", "crop_x", "music", "sfx_intro", "sfx_peak",
     "captions", "status", "words", "hook_zoom", "emojis", "censor", "sfx",
     "cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style",
-    "split_ratio", "cam_corner", "cam_crop_x", "cam_crop_y"
+    "split_ratio", "cam_corner", "cam_crop_x", "cam_crop_y", "aspect_ratio"
 }
 
 
@@ -384,6 +384,8 @@ def patch_clip(cid: int, body: dict = Body(...)):
             raise HTTPException(400, f"Can't change '{k}'.")
         if k == "template" and val not in TEMPLATES:
             raise HTTPException(400, "Unknown caption style.")
+        if k == "aspect_ratio" and val not in ("9:16", "1:1", "16:9"):
+            raise HTTPException(400, "Aspect ratio must be 9:16, 1:1, or 16:9.")
         if k == "layout":
             if val == "dual":
                 val = "stack"

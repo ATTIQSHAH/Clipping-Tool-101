@@ -111,14 +111,23 @@ def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, e
     style_box = 3 if t["box"] else 1
     back = _bgr("#000000", 90 if t["box"] else 128)
     outc = _bgr(t["outline"], 90) if t["box"] else _bgr(t["outline"])
+
+    # Scale font size, margins, and outline with export resolution / aspect ratio
+    scale = float(height) / 1920.0
+    fsize = max(24, int(round(t["size"] * scale)))
+    mv = max(28, int(round(t["mv"] * scale)))
+    ow = max(2, int(round(t["ow"] * scale)))
+    sh = max(1, int(round(t["shadow"] * scale)))
+    bsize = max(22, int(round(52 * scale)))
+    bmv = max(20, int(round(110 * scale)))
     
     # Banner styles for top hook headline
     if banner_style == "dark_box":
-        banner_def = "Style: Banner,Arial,52,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,16,6,8,80,80,110,1\n"
+        banner_def = f"Style: Banner,Arial,{bsize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,16,6,8,80,80,{bmv},1\n"
     elif banner_style == "neon":
-        banner_def = "Style: Banner,Arial,54,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,10,8,80,80,110,1\n"
+        banner_def = f"Style: Banner,Arial,{bsize+2},&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,10,8,80,80,{bmv},1\n"
     else:  # white_box (standard TikTok / Instagram card)
-        banner_def = "Style: Banner,Arial,52,&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,16,6,8,80,80,110,1\n"
+        banner_def = f"Style: Banner,Arial,{bsize},&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,16,6,8,80,80,{bmv},1\n"
 
     head = (
         "[Script Info]\nScriptType: v4.00+\nWrapStyle: 0\nScaledBorderAndShadow: yes\n"
@@ -126,8 +135,8 @@ def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, e
         "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,"
         "Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,"
         "MarginR,MarginV,Encoding\n"
-        f"Style: Main,{t['font']},{t['size']},{_bgr(t['primary'])},{_bgr(t['primary'])},{outc},{back},"
-        f"{-1 if t['bold'] else 0},0,0,0,100,100,0,0,{style_box},{t['ow']},{t['shadow']},2,60,60,{t['mv']},1\n"
+        f"Style: Main,{t['font']},{fsize},{_bgr(t['primary'])},{_bgr(t['primary'])},{outc},{back},"
+        f"{-1 if t['bold'] else 0},0,0,0,100,100,0,0,{style_box},{ow},{sh},2,60,60,{mv},1\n"
         + (banner_def if banner_text and banner_style != "none" else "") +
         "\n[Events]\nFormat: Layer,Start,End,Name,Style,MarginL,MarginR,MarginV,Effect,Text\n"
     )

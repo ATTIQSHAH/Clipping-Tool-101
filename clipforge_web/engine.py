@@ -318,13 +318,60 @@ def analyze_video(job, video_id, p):
 
 
 # ---------------- captions for a clip ----------------
+def ensure_clip_words(clip, video=None):
+    """Ensure the clip has valid words. If words are missing, transcribe the clip audio on the fly."""
+    raw = clip.get("words")
+    words = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    matching = [w for w in words if w["start"] >= clip["start"] - 0.05 and w["end"] <= clip["end"] + 0.05]
+    if matching:
+        return words
+
+    vid_id = clip["video_id"]
+    if not video:
+        video = db.q("select * from videos where id=?", (vid_id,), one=True)
+    if not video:
+        return []
+    src = clip_source(clip, video)
+    if not os.path.exists(src):
+        return []
+
+    try:
+        ffmpeg = which("ffmpeg")
+        work = wdir(vid_id)
+        cid = clip["id"]
+        start, dur = clip["start"], max(0.5, clip["end"] - clip["start"])
+        clip_wav = os.path.join(work, f"clip_{cid}_speech.wav")
+        cmd = [ffmpeg, "-y", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", src,
+               "-vn", "-ac", "1", "-ar", "16000", clip_wav]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        tr = transcribe_file(clip_wav, model="base")
+        tr_words = tr.get("words") or []
+        if tr_words:
+            new_words = []
+            for w in tr_words:
+                new_words.append({"w": w["w"], "start": round(start + w["start"], 3), "end": round(start + w["end"], 3)})
+            db.ex("update clips set words=? where id=?", (db.dumps(new_words), cid))
+            clip["words"] = new_words
+            return new_words
+    except Exception:
+        pass
+    return []
+
+
 def clip_words(clip):
     """Words inside the clip on the clip timeline, each remembering its index in the stored word list."""
     raw = clip.get("words")
     words = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    return [{"w": w["w"], "start": w["start"] - clip["start"], "end": w["end"] - clip["start"], "i": i}
-            for i, w in enumerate(words)
-            if w["start"] >= clip["start"] - 0.01 and w["end"] <= clip["end"] + 0.01]
+    res = [{"w": w["w"], "start": w["start"] - clip["start"], "end": w["end"] - clip["start"], "i": i}
+           for i, w in enumerate(words)
+           if w["start"] >= clip["start"] - 0.05 and w["end"] <= clip["end"] + 0.05]
+    if not res:
+        new_words = ensure_clip_words(clip)
+        if new_words:
+            res = [{"w": w["w"], "start": w["start"] - clip["start"], "end": w["end"] - clip["start"], "i": i}
+                   for i, w in enumerate(new_words)
+                   if w["start"] >= clip["start"] - 0.05 and w["end"] <= clip["end"] + 0.05]
+    return res
 
 
 def auto_sfx(clip):
@@ -354,7 +401,34 @@ def auto_sfx(clip):
 
 
 def clip_cues(clip):
-    return captions.build_cues(clip_words(clip))
+    words = clip_words(clip)
+    if words:
+        cues = captions.build_cues(words)
+        if cues:
+            return cues
+
+    # Fallback to kinetic phrase cues from title so subtitles never appear blank
+    title = (clip.get("title") or "MOMENT OF THE STREAM 🔥").strip()
+    dur = max(1.0, clip["end"] - clip["start"])
+    words_list = title.split()
+    if not words_list:
+        words_list = ["WATCH", "THIS", "MOMENT", "🔥"]
+
+    chunk_size = 3
+    chunks = [words_list[i:i + chunk_size] for i in range(0, len(words_list), chunk_size)]
+    chunk_dur = min(2.5, dur / max(len(chunks), 1))
+    cues = []
+    for idx, ch in enumerate(chunks):
+        c_start = idx * chunk_dur
+        c_end = min(dur, c_start + chunk_dur)
+        w_dur = (c_end - c_start) / max(len(ch), 1)
+        c_words = []
+        for j, wrd in enumerate(ch):
+            ws = c_start + j * w_dur
+            we = ws + w_dur
+            c_words.append({"w": wrd, "start": ws, "end": we, "i": idx * 10 + j})
+        cues.append({"words": c_words, "start": c_start, "end": c_end, "text": " ".join(ch)})
+    return cues
 
 
 def edit_cue(clip, first, last, text):
@@ -536,8 +610,20 @@ def render(job, clip_id, p):
     hook_zoom = bool(c["hook_zoom"]) if ("hook_zoom" in c and c["hook_zoom"] is not None) else True
     banner_text = c.get("banner_text") or ""
     banner_style = c.get("banner_style") or "white_box"
+
+    res_base = int(c["res"] or 1080)
+    aspect = str(c.get("aspect_ratio") or "9:16").strip()
+    if aspect == "1:1":
+        W, H = res_base, res_base
+    elif aspect == "16:9":
+        H = res_base
+        W = int(res_base * 16 / 9) // 2 * 2
+    else:
+        W = res_base
+        H = int(res_base * 16 / 9) // 2 * 2
+
     with open(ass, "w", encoding="utf-8") as f:
-        f.write(captions.to_ass(cues, c["template"], censor=censor, emojis=emojis, hook_boost=True,
+        f.write(captions.to_ass(cues, c["template"], width=W, height=H, censor=censor, emojis=emojis, hook_boost=True,
                                 banner_text=banner_text, banner_style=banner_style))
     out_dir = os.path.join(db.DATA, "exports")
     os.makedirs(out_dir, exist_ok=True)
@@ -551,7 +637,7 @@ def render(job, clip_id, p):
             db.ex("update clips set render_progress=? where id=?", (pct, clip_id))
     setp(0.01)
     track, layout = None, c["layout"]
-    wide = v["w"] / v["h"] > 9 / 16 + 0.01
+    wide = v["w"] / v["h"] > (W / H) + 0.01
     if layout in ("stack", "pip") and wide:
         cam = get_cam(job, c, v)
         job.log({"facecam": "Facecam found: placed over the gameplay." if layout == "pip" else "Facecam found: stacked above the gameplay.", "camera": "Full camera shot: following the face.",
@@ -577,7 +663,7 @@ def render(job, clip_id, p):
         if path and c["start"] <= e["t"] < c["end"]:
             sfx.append((path, e["t"] - c["start"], e["v"]))
     music = audiolib.resolve("music", c["music"])
-    job.log(f"Rendering {dur:.0f}s clip at {RES[c['res']][0]}x{RES[c['res']][1]}...")
+    job.log(f"Rendering {dur:.0f}s clip at {W}x{H} ({aspect})...")
     if c.get("sfx_peak"):
         p_peak = audiolib.resolve("sfx", c["sfx_peak"])
         if p_peak:
@@ -595,5 +681,6 @@ def render(job, clip_id, p):
                 split_ratio=float(c.get("split_ratio") or 0.5),
                 cam_crop_x=float(c.get("cam_crop_x") if c.get("cam_crop_x") is not None else 0.5),
                 cam_crop_y=float(c.get("cam_crop_y") if c.get("cam_crop_y") is not None else 0.5),
-                cam_corner=c.get("cam_corner") or "tr")
+                cam_corner=c.get("cam_corner") or "tr",
+                aspect_ratio=aspect)
     db.ex("update clips set render_status='done', render_progress=100, render_path=? where id=?", (out, clip_id))

@@ -582,9 +582,9 @@ function buildEditor(){
     
     <div class="studio-head-center">
       <div class="seg" id="aspectRatio" title="Aspect Ratio">
-        <button data-aspect="9:16" class="on">📱 9:16</button>
-        <button data-aspect="1:1">⬛ 1:1</button>
-        <button data-aspect="16:9">🖥️ 16:9</button>
+        <button data-aspect="9:16" class="${(c.aspect_ratio||'9:16')==='9:16'?'on':''}">📱 9:16</button>
+        <button data-aspect="1:1" class="${c.aspect_ratio==='1:1'?'on':''}">⬛ 1:1</button>
+        <button data-aspect="16:9" class="${c.aspect_ratio==='16:9'?'on':''}">🖥️ 16:9</button>
       </div>
       <div class="seg" id="res" title="Export Resolution">
         <button data-r="1080">1080p</button>
@@ -642,21 +642,22 @@ function buildEditor(){
             </div>
             <input id="splitRatio" type="range" min="0.25" max="0.75" step="0.05" value="${c.split_ratio || 0.5}">
             <div class="row muted small"><span>25% Top</span><span style="flex:1;text-align:center">50% Equal Split</span><span>75% Top</span></div>
+            <button id="swapDualScreens" class="ghost fit" style="width:100%;font-size:12px;padding:6px;margin-top:8px">🔄 Swap: ${c.cam_pos==='bottom'?'Gameplay Top / Streamer Bottom':'Streamer Top / Gameplay Bottom'}</button>
           </div>
 
           <!-- Streamer Camera Source Selection -->
           <div class="card" style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px">
             <label style="margin:0;font-weight:700">Select Where Streamer Is in the Video:</label>
             <div class="snap-grid" id="snapGrid" style="margin:6px 0">
-              <button data-snap="tl" class="${c.cam_corner==='tl'?'on':''}">↖ Top-Left (Speed)</button>
+              <button data-snap="tl" class="${c.cam_corner==='tl'?'on':''}">↖ Top-Left</button>
               <button data-snap="tr" class="${(c.cam_corner==='tr'||!c.cam_corner)?'on':''}">↗ Top-Right (Kai/Jynxzi)</button>
-              <button data-snap="bl" class="${c.cam_corner==='bl'?'on':''}">↙ Bottom-Left</button>
+              <button data-snap="bl" class="${c.cam_corner==='bl'?'on':''}">↙ Bottom-Left (Speed)</button>
               <button data-snap="br" class="${c.cam_corner==='br'?'on':''}">↘ Bottom-Right</button>
               <button data-snap="tc" class="${c.cam_corner==='tc'?'on':''}">⬆ Top-Center</button>
               <button data-snap="bc" class="${c.cam_corner==='bc'?'on':''}">⬇ Bottom-Center</button>
             </div>
             <button id="camEdit" class="primary fit" style="width:100%;margin-top:6px;font-weight:700;padding:7px 10px">🎯 Drag & Select Streamer Box on Video</button>
-            <div class="cam-drag-tip" style="margin-top:6px">💡 Click ↙ Bottom-Left if streamer is bottom-left, or Drag & Select to outline exact webcam box!</div>
+            <div class="cam-drag-tip" style="margin-top:6px">💡 Click ↙ Bottom-Left (Speed) or Drag & Select to outline exact webcam box!</div>
           </div>
 
           <div>
@@ -954,6 +955,18 @@ function buildEditor(){
     });
   }
 
+  // Swap Dual-Cam Screen Positions (Top vs Bottom)
+  if($('#swapDualScreens')){
+    $('#swapDualScreens').onclick=guard(async()=>{
+      const newPos = (S.clip.cam_pos==='bottom')?'top':'bottom';
+      S.clip.cam_pos = newPos;
+      $('#swapDualScreens').textContent = '🔄 Swap: ' + (newPos==='bottom'?'Gameplay Top / Streamer Bottom':'Streamer Top / Gameplay Bottom');
+      await save({cam_pos: newPos});
+      applyLayout();
+      toast('Swapped screens: ' + (newPos==='bottom'?'Streamer on Bottom':'Streamer on Top'));
+    });
+  }
+
   // Camera Shape (Rect / Circle)
   $('#camShape').onclick=guard(async e=>{
     const b=e.target.closest('[data-shape]');if(!b)return;
@@ -1012,15 +1025,16 @@ function buildEditor(){
   if($('#camEdit'))$('#camEdit').onclick=camEditor;
 
   // Aspect Ratio & Resolution
-  $('#aspectRatio').onclick=e=>{
+  $('#aspectRatio').onclick=guard(async e=>{
     const b=e.target.closest('[data-aspect]');if(!b)return;
-    $('#aspectRatio').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
     const asp=b.dataset.aspect, ph=$('#phone');
-    if(asp==='1:1')ph.style.aspectRatio='1/1';
-    else if(asp==='16:9')ph.style.aspectRatio='16/9';
-    else ph.style.aspectRatio='9/16';
+    $('#aspectRatio').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+    S.clip.aspect_ratio=asp;
+    if(ph) ph.style.aspectRatio=(asp==='1:1')?'1/1':(asp==='16:9')?'16/9':'9/16';
+    await save({aspect_ratio: asp});
+    applyLayout();
     toast(`Aspect ratio set to ${asp}.`);
-  };
+  });
   $('#res').onclick=guard(async e=>{const b=e.target.closest('[data-r]');if(!b)return;await save({res:+b.dataset.r});markSeg()});
   $('#cx').oninput=e=>{S.clip.crop_x=+e.target.value;applyLayout()};$('#cx').onchange=guard(e=>save({crop_x:+e.target.value}));
 
@@ -1077,26 +1091,29 @@ function initCanvasDrag(){
           moved: false
         };
         cv.style.cursor = 'row-resize';
-      } else if(my < th){
-        // Dragging inside streamer top screen (pan streamer)
-        S.canvasDrag = {
-          mode: 'cam_pan',
-          startX: mx,
-          startY: my,
-          initialX: typeof c.cam_crop_x === 'number' ? c.cam_crop_x : 0.5,
-          initialY: typeof c.cam_crop_y === 'number' ? c.cam_crop_y : 0.5,
-          moved: false
-        };
-        cv.style.cursor = 'grabbing';
       } else {
-        // Dragging inside gameplay bottom screen (pan gameplay)
-        S.canvasDrag = {
-          mode: 'game_pan',
-          startX: mx,
-          initialX: typeof c.crop_x === 'number' ? c.crop_x : 0.5,
-          moved: false
-        };
-        cv.style.cursor = 'ew-resize';
+        const isStreamerClick = (c.cam_pos !== 'bottom') ? (my < th) : (my > th);
+        if(isStreamerClick){
+          // Dragging inside streamer screen (pan streamer)
+          S.canvasDrag = {
+            mode: 'cam_pan',
+            startX: mx,
+            startY: my,
+            initialX: typeof c.cam_crop_x === 'number' ? c.cam_crop_x : 0.5,
+            initialY: typeof c.cam_crop_y === 'number' ? c.cam_crop_y : 0.5,
+            moved: false
+          };
+          cv.style.cursor = 'grabbing';
+        } else {
+          // Dragging inside gameplay screen (pan gameplay)
+          S.canvasDrag = {
+            mode: 'game_pan',
+            startX: mx,
+            initialX: typeof c.crop_x === 'number' ? c.crop_x : 0.5,
+            moved: false
+          };
+          cv.style.cursor = 'ew-resize';
+        }
       }
       e.preventDefault();
       return;
@@ -1199,10 +1216,9 @@ function initCanvasDrag(){
       const th = Math.round(H * (c.split_ratio || 0.5));
       if(Math.abs(my - th) <= 14){
         cv.style.cursor = 'row-resize';
-      } else if(my < th){
-        cv.style.cursor = 'grab';
       } else {
-        cv.style.cursor = 'ew-resize';
+        const isStreamerHover = (c.cam_pos !== 'bottom') ? (my < th) : (my > th);
+        cv.style.cursor = isStreamerHover ? 'grab' : 'ew-resize';
       }
       return;
     }
@@ -1339,10 +1355,15 @@ function markSeg(){
   const c=S.clip;if(!c)return;
   $('#layout').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.l===c.layout));
   $('#res').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.r===c.res));
+  if($('#aspectRatio'))$('#aspectRatio').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.aspect===(c.aspect_ratio||'9:16')));
   if($('#camShape'))$('#camShape').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.shape===(c.cam_shape||'rect')));
   if($('#bannerStyle'))$('#bannerStyle').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.bs===(c.banner_style||'white_box')));
   if($('#snapGrid'))$('#snapGrid').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.snap===(c.cam_corner||'tr')));
   if($('#dualSplitBox'))$('#dualSplitBox').hidden = c.layout !== 'stack';
+  const ph=$('#phone');
+  if(ph && c.aspect_ratio){
+    ph.style.aspectRatio = c.aspect_ratio==='1:1'?'1/1':c.aspect_ratio==='16:9'?'16/9':'9/16';
+  }
 }
 function updDur(){
   const c=S.clip;
@@ -1608,16 +1629,23 @@ function drawStack(v,f,c){
 
   // Dual-Cam Stack Mode: Splits into 2 stacked screens
   const topShare = Math.max(0.25, Math.min(0.75, c.split_ratio || 0.5));
+  const isStreamerBottom = c.cam_pos === 'bottom';
   const th = Math.round(H * topShare), bh = H - th;
 
-  // 1. Lower Screen: Crisp Gameplay
-  const gameAspect = W / bh;
+  const streamH = isStreamerBottom ? bh : th;
+  const gameH = isStreamerBottom ? th : bh;
+  const streamY = isStreamerBottom ? th : 0;
+  const gameY = isStreamerBottom ? 0 : th;
+  const dividerY = th;
+
+  // 1. Gameplay Screen
+  const gameAspect = W / gameH;
   const gw = Math.min(vw, vh * gameAspect);
   const gx = Math.max(0, Math.min(vw - gw, (vw - gw) * (c.crop_x ?? 0.5)));
-  g.drawImage(v, gx, 0, gw, vh, 0, th, W, bh);
+  g.drawImage(v, gx, 0, gw, vh, 0, gameY, W, gameH);
 
-  // 2. Upper Screen: Streamer Reaction Camera
-  const topAspect = W / th;
+  // 2. Streamer Reaction Camera
+  const topAspect = W / streamH;
   let zw, zh;
   if(cw / ch > topAspect){
     zh = Math.min(vh, ch / zoom);
@@ -1632,37 +1660,20 @@ function drawStack(v,f,c){
   const zy = Math.max(0, Math.min(vh - zh, cy + (ch - zh) * panY));
 
   g.save();
-  if(shape === 'circle'){
-    g.fillStyle = '#0d111a';
-    g.fillRect(0, 0, W, th);
-    const diam = Math.min(W * 0.88, th * 0.92);
-    const cx_dst = (W - diam) / 2, cy_dst = (th - diam) / 2;
-    g.beginPath();
-    g.arc(cx_dst + diam/2, cy_dst + diam/2, diam/2, 0, Math.PI * 2);
-    g.clip();
-    g.drawImage(v, zx, zy, zw, zh, cx_dst, cy_dst, diam, diam);
-    g.restore();
-    g.beginPath();
-    g.arc(cx_dst + diam/2, cy_dst + diam/2, diam/2, 0, Math.PI * 2);
-    g.strokeStyle = '#8c9bff';
-    g.lineWidth = 3;
-    g.stroke();
-  } else {
-    g.drawImage(v, zx, zy, zw, zh, 0, 0, W, th);
-    g.restore();
-  }
+  g.drawImage(v, zx, zy, zw, zh, 0, streamY, W, streamH);
+  g.restore();
 
   // 3. Divider Accent Line between Streamer and Gameplay
   g.fillStyle = '#6366f1';
-  g.fillRect(0, th - 2, W, 4);
+  g.fillRect(0, dividerY - 2, W, 4);
   
   // Center Grip Pill
   g.fillStyle = '#ffffff';
   g.beginPath();
   if(typeof g.roundRect === 'function'){
-    g.roundRect(W / 2 - 20, th - 3.5, 40, 7, 3);
+    g.roundRect(W / 2 - 20, dividerY - 3.5, 40, 7, 3);
   } else {
-    g.fillRect(W / 2 - 20, th - 3.5, 40, 7);
+    g.fillRect(W / 2 - 20, dividerY - 3.5, 40, 7);
   }
   g.fill();
 }

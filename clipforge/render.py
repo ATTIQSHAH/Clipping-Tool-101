@@ -39,8 +39,18 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
                 encoder="libx264", fps=30, res=1080, music=None, music_vol=0.18, duck=True, sfx=(),
                 track=None, hook_zoom=True, on_progress=None,
                 cam_zoom=1.0, cam_shape="rect", cam_pos="top", cam_pos_x=0.5, cam_pos_y=0.65, split_ratio=0.5,
-                cam_crop_x=0.5, cam_crop_y=0.5, cam_corner="tr"):
-    W, H = RES[res]
+                cam_crop_x=0.5, cam_crop_y=0.5, cam_corner="tr", aspect_ratio="9:16"):
+    base = int(res or 1080)
+    aspect = str(aspect_ratio or "9:16").strip()
+    if aspect == "1:1":
+        W, H = base, base
+    elif aspect == "16:9":
+        H = base
+        W = int(base * 16 / 9) // 2 * 2
+    else:  # "9:16" default
+        W = base
+        H = int(base * 16 / 9) // 2 * 2
+
     w, h = info["w"], info["h"]
     s = max(0.0, float(start))
     dur = max(0.5, float(end) - s)
@@ -68,13 +78,12 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
             cw_, ch_ = zw, zh
         cam = [cx, cy, cw_, ch_]
 
+    target_ratio = W / H
     is_pip = layout == "pip"
-    if is_pip and cam and w / h > 9 / 16 + 0.01:
+    if is_pip and cam and w / h > target_ratio + 0.01:
         from .faces import PIP_SIZE, PIP_TOP
-        gw = int(h * 9 / 16) // 2 * 2
-        gx = int((w - gw) * min(max(crop_x, 0), 1)) // 2 * 2
         cx, cy, cw_, ch_ = cam
-        pw = int(W * PIP_SIZE) // 2 * 2
+        pw = int(min(W, H) * (PIP_SIZE if aspect == "9:16" else 0.38)) // 2 * 2
         ph = int(pw * ch_ / cw_) // 2 * 2
         
         # Position calculation
@@ -97,34 +106,32 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         else:
             shape_filter = f",scale={pw}:{ph}:flags=lanczos"
 
-        # Viral Shorts layout: Crisp 16:9 gameplay centered + blurred 9:16 background + floating streamer cam
-        game_h = int(W * h / w) // 2 * 2
         fc = (f"[0:v]split=3[v_bg][v_game][v_pip];"
               f"[v_bg]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=25:6[bg];"
-              f"[v_game]scale={W}:{game_h}:flags=lanczos[game];"
+              f"[v_game]scale={W}:{H}:force_original_aspect_ratio=decrease:flags=lanczos[game];"
               f"[v_pip]crop={cw_}:{ch_}:{cx}:{cy}{shape_filter}[pip];"
-              f"[bg][game]overlay=0:(H-h)/2[base];"
+              f"[bg][game]overlay=(W-w)/2:(H-h)/2[base];"
               f"[base][pip]overlay={ox}:{oy},setsar=1{zoom},ass={ass}[v]")
-    elif layout == "stack" and w / h > 9 / 16 + 0.01:
+    elif layout == "stack" and w / h > target_ratio + 0.01:
         top_share = max(0.25, min(float(split_ratio or 0.5), 0.75))
         th = int(H * top_share) // 2 * 2
         bh = H - th
         gw = min(w, int(h * W / bh)) // 2 * 2
         gx = int((w - gw) * min(max(crop_x, 0), 1)) // 2 * 2
         if not cam:
-            corner = cam_corner or cam_pos or "tr"
+            corner = cam_corner or cam_pos or "bl"
             if corner == "tl":
                 cx, cy, cw_, ch_ = 0, 0, int(w * 0.35), int(h * 0.50)
-            elif corner == "bl":
-                cx, cy, cw_, ch_ = 0, int(h * 0.45), int(w * 0.35), int(h * 0.55)
+            elif corner == "tr":
+                cx, cy, cw_, ch_ = int(w * 0.65), 0, int(w * 0.35), int(h * 0.50)
             elif corner == "br":
                 cx, cy, cw_, ch_ = int(w * 0.65), int(h * 0.45), int(w * 0.35), int(h * 0.55)
             elif corner == "tc":
                 cx, cy, cw_, ch_ = int(w * 0.325), 0, int(w * 0.35), int(h * 0.50)
             elif corner == "bc":
                 cx, cy, cw_, ch_ = int(w * 0.325), int(h * 0.45), int(w * 0.35), int(h * 0.55)
-            else: # "tr" default
-                cx, cy, cw_, ch_ = int(w * 0.65), 0, int(w * 0.35), int(h * 0.50)
+            else:  # "bl" default
+                cx, cy, cw_, ch_ = 0, int(h * 0.45), int(w * 0.35), int(h * 0.55)
         else:
             cx, cy, cw_, ch_ = cam
 
@@ -154,20 +161,28 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
             fc = (f"[0:v]split[a][b];[a]crop={scw}:{sch}:{scx}:{scy},scale={W}:{th}:flags=lanczos[top];"
                   f"[b]crop={gw}:{h}:{gx}:0,scale={W}:{bh}:flags=lanczos[bot];"
                   f"[top][bot]vstack,setsar=1{zoom},ass={ass}[v]")
-    elif layout in ("blur", "stack", "pip") or w / h <= 9 / 16 + 0.01:     # stack without a facecam: whole gameplay, blurred fill
+    elif layout in ("blur", "stack", "pip") or w / h <= target_ratio + 0.01:
         fc = (f"[0:v]split[a][b];[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
               f"boxblur=25:6[bg];[b]scale={W}:{H}:force_original_aspect_ratio=decrease:flags=lanczos[fg];"
               f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1{zoom},ass={ass}[v]")
     elif layout == "follow" and track and track.get("pts"):
         from .faces import crop_width, write_sendcmd
-        cw = crop_width(h)
+        cw = min(w, int(h * target_ratio)) // 2 * 2
         cmd_name = os.path.splitext(ass)[0] + ".cmd"
         x0 = write_sendcmd(track["pts"], os.path.join(tmp, cmd_name))
         fc = (f"[0:v]sendcmd=f={cmd_name},crop={cw}:{h}:{x0}:0,scale={W}:{H}:flags=lanczos,setsar=1{zoom},ass={ass}[v]")
     else:
-        cw = int(h * 9 / 16) // 2 * 2
-        x = int((w - cw) * min(max(crop_x, 0), 1)) // 2 * 2
-        fc = f"[0:v]crop={cw}:{h}:{x}:0,scale={W}:{H}:flags=lanczos,setsar=1{zoom},ass={ass}[v]"
+        if w / h > target_ratio:
+            cw = int(h * target_ratio) // 2 * 2
+            ch = h
+            x = int((w - cw) * min(max(crop_x, 0), 1)) // 2 * 2
+            y = 0
+        else:
+            cw = w
+            ch = int(w / target_ratio) // 2 * 2
+            x = 0
+            y = int((h - ch) * 0.5) // 2 * 2
+        fc = f"[0:v]crop={cw}:{ch}:{x}:{y},scale={W}:{H}:flags=lanczos,setsar=1{zoom},ass={ass}[v]"
     af, extra_in = _audio_graph(music, music_vol, duck, sfx, 1)
     cmd = ([ffmpeg, "-nostdin", "-y", "-ss", f"{s:.3f}", "-t", f"{dur:.3f}", "-i", os.path.abspath(src)] + extra_in +
            ["-filter_complex", fc + ";" + af, "-map", "[v]", "-map", "[aout]"] + ENC[encoder] +
