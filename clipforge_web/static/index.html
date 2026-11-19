@@ -433,6 +433,8 @@ async function selectClip(id){
   try{
     S.cid=id;
     S.clip=await api('/api/clips/'+id);
+    S.vid=S.clip.video_id;
+    S.video=S.videos.find(v=>v.id===S.vid)||S.video;
     S.framing=null;
     try{await loadCues()}catch(e){S.cues=[]}
     showEditor(true);
@@ -440,6 +442,7 @@ async function selectClip(id){
     drawCands();
     drawMap();
     try{await loadFraming()}catch(e){}
+    applyLayout();
     if(window.innerWidth<=1100&&$('#editor')){$('#editor').scrollIntoView({behavior:'smooth'})}
   }catch(e){toast('Error opening clip editor: '+e.message,true)}
 }
@@ -531,14 +534,23 @@ function camEditor(){
   };
   cv.onpointerup = () => drag = null;
 
-  m.querySelector('#camSetTL').onclick = () => { b = [0, 0, W * 0.35, H * 0.45]; draw(); };
-  m.querySelector('#camSetTR').onclick = () => { b = [W * 0.65, 0, W * 0.35, H * 0.45]; draw(); };
-  m.querySelector('#camSetBL').onclick = () => { b = [0, H * 0.55, W * 0.35, H * 0.45]; draw(); };
-  m.querySelector('#camSetBR').onclick = () => { b = [W * 0.65, H * 0.55, W * 0.35, H * 0.45]; draw(); };
-  m.querySelector('#camSetCenter').onclick = () => { b = [W * 0.25, H * 0.15, W * 0.5, H * 0.6]; draw(); };
+  m.querySelector('#camSetTL').onclick = () => { b = [0, 0, W * 0.35, H * 0.50]; draw(); };
+  m.querySelector('#camSetTR').onclick = () => { b = [W * 0.65, 0, W * 0.35, H * 0.50]; draw(); };
+  m.querySelector('#camSetBL').onclick = () => { b = [0, H * 0.45, W * 0.35, H * 0.55]; draw(); };
+  m.querySelector('#camSetBR').onclick = () => { b = [W * 0.65, H * 0.45, W * 0.35, H * 0.55]; draw(); };
+  m.querySelector('#camSetCenter').onclick = () => { b = [W * 0.325, 0, W * 0.35, H * 0.50]; draw(); };
 
   const done = async box => {
-    await send('PATCH', '/api/videos/' + S.vid, { cam_box: box });
+    const vid = S.vid || (S.clip && S.clip.video_id);
+    if(box){
+      if(S.video) S.video.cam_box = JSON.stringify(box);
+      await send('PATCH', '/api/videos/' + vid, { cam_box: box });
+      await save({ cam_corner: 'custom', cam_crop_x: 0.5, cam_crop_y: 0.5 });
+    } else {
+      if(S.video) S.video.cam_box = null;
+      await send('PATCH', '/api/videos/' + vid, { cam_box: null });
+      await save({ cam_corner: 'tr', cam_crop_x: 0.5, cam_crop_y: 0.5 });
+    }
     m.remove();
     S.framing = null;
     await loadClips();
@@ -636,14 +648,15 @@ function buildEditor(){
           <div class="card" style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px">
             <label style="margin:0;font-weight:700">Select Where Streamer Is in the Video:</label>
             <div class="snap-grid" id="snapGrid" style="margin:6px 0">
-              <button data-snap="tl">↖ Top-Left (Speed)</button>
-              <button data-snap="tr">↗ Top-Right (Kai/Jynxzi)</button>
-              <button data-snap="bl">↙ Bottom-Left</button>
-              <button data-snap="br">↘ Bottom-Right</button>
-              <button data-snap="tc" style="grid-column:span 2">⬆ Top-Center</button>
+              <button data-snap="tl" class="${c.cam_corner==='tl'?'on':''}">↖ Top-Left (Speed)</button>
+              <button data-snap="tr" class="${(c.cam_corner==='tr'||!c.cam_corner)?'on':''}">↗ Top-Right (Kai/Jynxzi)</button>
+              <button data-snap="bl" class="${c.cam_corner==='bl'?'on':''}">↙ Bottom-Left</button>
+              <button data-snap="br" class="${c.cam_corner==='br'?'on':''}">↘ Bottom-Right</button>
+              <button data-snap="tc" class="${c.cam_corner==='tc'?'on':''}">⬆ Top-Center</button>
+              <button data-snap="bc" class="${c.cam_corner==='bc'?'on':''}">⬇ Bottom-Center</button>
             </div>
             <button id="camEdit" class="primary fit" style="width:100%;margin-top:6px;font-weight:700;padding:7px 10px">🎯 Drag & Select Streamer Box on Video</button>
-            <div class="cam-drag-tip" style="margin-top:6px">Click button above to drag a box directly over the streamer's camera!</div>
+            <div class="cam-drag-tip" style="margin-top:6px">💡 Click ↙ Bottom-Left if streamer is bottom-left, or Drag & Select to outline exact webcam box!</div>
           </div>
 
           <div>
@@ -655,8 +668,8 @@ function buildEditor(){
           <div>
             <label>Cam Frame Shape</label>
             <div class="seg" id="camShape">
-              <button data-shape="rect">⬛ Rectangle Frame</button>
-              <button data-shape="circle">⭕ Circle Frame</button>
+              <button data-shape="rect" class="${(c.cam_shape||'rect')==='rect'?'on':''}">⬛ Rectangle Frame</button>
+              <button data-shape="circle" class="${c.cam_shape==='circle'?'on':''}">⭕ Circle Frame</button>
             </div>
           </div>
 
@@ -890,36 +903,31 @@ function buildEditor(){
     const vw=v?.videoWidth || (S.video && S.video.w) || 1280;
     const vh=v?.videoHeight || (S.video && S.video.h) || 720;
     
-    if(S.clip.layout === 'stack'){
-      let box;
-      if(s==='tl') box=[0, 0, Math.round(vw*0.35), Math.round(vh*0.45)];
-      else if(s==='tr') box=[Math.round(vw*0.65), 0, Math.round(vw*0.35), Math.round(vh*0.45)];
-      else if(s==='bl') box=[0, Math.round(vh*0.55), Math.round(vw*0.35), Math.round(vh*0.45)];
-      else if(s==='br') box=[Math.round(vw*0.65), Math.round(vh*0.55), Math.round(vw*0.35), Math.round(vh*0.45)];
-      else if(s==='tc') box=[Math.round(vw*0.325), 0, Math.round(vw*0.35), Math.round(vh*0.45)];
-      else box=[Math.round(vw*0.65), 0, Math.round(vw*0.35), Math.round(vh*0.45)];
-      
-      await send('PATCH', '/api/videos/'+S.vid, {cam_box: box});
-      await save({cam_pos: s, cam_corner: s, layout: 'stack'});
-      S.framing = null;
-      await loadFraming();
-      applyLayout();
-      toast('Streamer location updated to '+s.toUpperCase());
-      return;
-    }
-
-    let x=0.5, y=0.65;
-    if(s==='tl'){ x=0.05; y=0.05; }
-    else if(s==='tc'){ x=0.5; y=0.05; }
-    else if(s==='tr'){ x=0.95; y=0.05; }
-    else if(s==='bl'){ x=0.05; y=0.92; }
-    else if(s==='bc'){ x=0.5; y=0.92; }
-    else if(s==='br'){ x=0.95; y=0.92; }
-    else if(s==='speed'){ x=0.5; y=0.65; }
+    let box;
+    if(s==='tl') box=[0, 0, Math.round(vw*0.35), Math.round(vh*0.50)];
+    else if(s==='tr') box=[Math.round(vw*0.65), 0, Math.round(vw*0.35), Math.round(vh*0.50)];
+    else if(s==='bl') box=[0, Math.round(vh*0.45), Math.round(vw*0.35), Math.round(vh*0.55)];
+    else if(s==='br') box=[Math.round(vw*0.65), Math.round(vh*0.45), Math.round(vw*0.35), Math.round(vh*0.55)];
+    else if(s==='tc') box=[Math.round(vw*0.325), 0, Math.round(vw*0.35), Math.round(vh*0.50)];
+    else if(s==='bc') box=[Math.round(vw*0.325), Math.round(vh*0.45), Math.round(vw*0.35), Math.round(vh*0.55)];
+    else box=[Math.round(vw*0.65), 0, Math.round(vw*0.35), Math.round(vh*0.50)];
     
-    await save({cam_pos_x:x, cam_pos_y:y, cam_pos:'pip_custom', layout:'pip'});
-    markSeg();applyLayout();
-    toast('Camera snapped to position.');
+    $('#snapGrid').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+    if(S.video) S.video.cam_box = JSON.stringify(box);
+    S.clip.cam_corner = s;
+    S.clip.cam = null;
+    if(!S.framing) S.framing = { w: vw, h: vh };
+    S.framing.box = box;
+    S.framing.cam = box;
+    applyLayout();
+    
+    const vid = S.vid || (S.clip && S.clip.video_id);
+    await send('PATCH', '/api/videos/'+vid, {cam_box: box});
+    await save({cam_corner: s, cam_pos: s, cam_crop_x: 0.5, cam_crop_y: 0.5});
+    S.framing = null;
+    await loadFraming();
+    applyLayout();
+    toast('Streamer set to '+b.textContent.trim());
   });
 
   // Dual-Cam Split Ratio
@@ -987,12 +995,19 @@ function buildEditor(){
   // Layout Engine
   $('#layout').onclick=guard(async e=>{
     const b=e.target.closest('[data-l]');if(!b)return;
-    await save({layout:b.dataset.l});
+    const l=b.dataset.l;
+    S.clip.layout=l;
+    $('#layout').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
     const ld=$('#layoutDesc');
     if(ld){
-      ld.innerHTML=b.dataset.l==='pip'?'<b>Floating Cam:</b> Streamer camera freely floats over the gameplay anywhere you drag it.':(b.dataset.l==='stack'?'<b>Dual-Cam layout:</b> Splits into 2 screens stacked vertically. Top captures streamer reaction, bottom captures gameplay.':'<b>Standard framing:</b> Single focused screen.');
+      ld.innerHTML=l==='pip'?'<b>Floating Cam:</b> Streamer camera freely floats over the gameplay anywhere you drag it.':(l==='stack'?'<b>Dual-Cam layout:</b> Splits into 2 screens stacked vertically. Top captures streamer reaction, bottom captures gameplay.':'<b>Standard framing:</b> Single focused screen.');
     }
-    markSeg();loadFraming();
+    const splitBox=$('#dualSplitBox');
+    if(splitBox) splitBox.hidden = l !== 'stack';
+    await save({layout:l});
+    S.framing = null;
+    await loadFraming();
+    applyLayout();
   });
   if($('#camEdit'))$('#camEdit').onclick=camEditor;
 
@@ -1041,64 +1056,196 @@ function updateTimeCode(){
 function initCanvasDrag(){
   const cv=$('#stackcv');
   if(!cv)return;
+
   cv.onpointerdown=e=>{
-    if(!S.camBox)return;
+    if(!S.clip) return;
     const r=cv.getBoundingClientRect();
     const mx=(e.clientX-r.left)*(cv.width/r.width), my=(e.clientY-r.top)*(cv.height/r.height);
-    const b=S.camBox;
-    let inside=false;
-    if(b.shape==='circle'){
-      inside=Math.hypot(mx-(b.x+b.w/2), my-(b.y+b.h/2)) <= Math.min(b.w,b.h)/2+10;
-    }else{
-      inside=mx>=b.x-6 && mx<=b.x+b.w+6 && my>=b.y-6 && my<=b.y+b.h+6;
-    }
-    if(inside){
+    const c=S.clip, W=cv.width, H=cv.height;
+
+    if(c.layout === 'stack'){
+      const topShare = Math.max(0.25, Math.min(0.75, c.split_ratio || 0.5));
+      const th = Math.round(H * topShare);
       cv.setPointerCapture(e.pointerId);
-      S.camDrag={dx:mx-b.x, dy:my-b.y, moved:false};
-      cv.style.cursor='grabbing';
+
+      if(Math.abs(my - th) <= 14){
+        // Dragging the split divider line
+        S.canvasDrag = {
+          mode: 'split',
+          startY: my,
+          initialRatio: topShare,
+          moved: false
+        };
+        cv.style.cursor = 'row-resize';
+      } else if(my < th){
+        // Dragging inside streamer top screen (pan streamer)
+        S.canvasDrag = {
+          mode: 'cam_pan',
+          startX: mx,
+          startY: my,
+          initialX: typeof c.cam_crop_x === 'number' ? c.cam_crop_x : 0.5,
+          initialY: typeof c.cam_crop_y === 'number' ? c.cam_crop_y : 0.5,
+          moved: false
+        };
+        cv.style.cursor = 'grabbing';
+      } else {
+        // Dragging inside gameplay bottom screen (pan gameplay)
+        S.canvasDrag = {
+          mode: 'game_pan',
+          startX: mx,
+          initialX: typeof c.crop_x === 'number' ? c.crop_x : 0.5,
+          moved: false
+        };
+        cv.style.cursor = 'ew-resize';
+      }
       e.preventDefault();
+      return;
     }
+
+    if(c.layout === 'pip' && S.camBox){
+      const b=S.camBox;
+      let inside = false;
+      if(b.shape==='circle'){
+        inside = Math.hypot(mx-(b.x+b.w/2), my-(b.y+b.h/2)) <= Math.min(b.w,b.h)/2+10;
+      }else{
+        inside = mx>=b.x-6 && mx<=b.x+b.w+6 && my>=b.y-6 && my<=b.y+b.h+6;
+      }
+      cv.setPointerCapture(e.pointerId);
+      if(inside){
+        S.canvasDrag = {
+          mode: 'pip_cam',
+          dx: mx - b.x,
+          dy: my - b.y,
+          moved: false
+        };
+        cv.style.cursor = 'grabbing';
+      } else {
+        S.canvasDrag = {
+          mode: 'game_pan',
+          startX: mx,
+          initialX: typeof c.crop_x === 'number' ? c.crop_x : 0.5,
+          moved: false
+        };
+        cv.style.cursor = 'ew-resize';
+      }
+      e.preventDefault();
+      return;
+    }
+
+    // Default: pan gameplay in single-screen modes
+    cv.setPointerCapture(e.pointerId);
+    S.canvasDrag = {
+      mode: 'game_pan',
+      startX: mx,
+      initialX: typeof c.crop_x === 'number' ? c.crop_x : 0.5,
+      moved: false
+    };
+    cv.style.cursor = 'ew-resize';
+    e.preventDefault();
   };
 
   cv.onpointermove=e=>{
     const r=cv.getBoundingClientRect();
     const mx=(e.clientX-r.left)*(cv.width/r.width), my=(e.clientY-r.top)*(cv.height/r.height);
-    if(S.camDrag && S.camBox){
-      const W=cv.width, H=cv.height, pw=S.camBox.w, ph=S.camBox.h;
-      const nx=Math.max(0,Math.min(W-pw,mx-S.camDrag.dx));
-      const ny=Math.max(0,Math.min(H-ph,my-S.camDrag.dy));
-      S.clip.cam_pos_x = W-pw > 0 ? nx/(W-pw) : 0.5;
-      S.clip.cam_pos_y = H-ph > 0 ? ny/(H-ph) : 0.65;
-      S.clip.cam_pos='pip_custom';
-      S.clip.layout='pip';
-      S.camDrag.moved=true;
-      applyLayout();
+    const c=S.clip, W=cv.width, H=cv.height;
+    if(!c) return;
+
+    if(S.canvasDrag){
+      const d=S.canvasDrag;
+      d.moved = true;
+
+      if(d.mode === 'split'){
+        const newRatio = Math.max(0.25, Math.min(0.75, my / H));
+        c.split_ratio = Math.round(newRatio * 100) / 100;
+        const sInp = $('#splitRatio'), sVal = $('#splitVal');
+        if(sInp) sInp.value = c.split_ratio;
+        if(sVal) sVal.textContent = Math.round(c.split_ratio*100)+'% Top / '+Math.round((1-c.split_ratio)*100)+'% Bottom';
+        applyLayout();
+        return;
+      }
+
+      if(d.mode === 'cam_pan'){
+        const dx = (mx - d.startX) / W;
+        const dy = (my - d.startY) / (H * (c.split_ratio || 0.5));
+        c.cam_crop_x = Math.max(0, Math.min(1, d.initialX - dx * 0.8));
+        c.cam_crop_y = Math.max(0, Math.min(1, d.initialY - dy * 0.8));
+        applyLayout();
+        return;
+      }
+
+      if(d.mode === 'game_pan'){
+        const dx = (mx - d.startX) / W;
+        c.crop_x = Math.max(0, Math.min(1, d.initialX - dx * 0.7));
+        const cxInp = $('#cx');
+        if(cxInp) cxInp.value = c.crop_x;
+        applyLayout();
+        return;
+      }
+
+      if(d.mode === 'pip_cam' && S.camBox){
+        const pw=S.camBox.w, ph=S.camBox.h;
+        const nx=Math.max(0, Math.min(W-pw, mx-d.dx));
+        const ny=Math.max(0, Math.min(H-ph, my-d.dy));
+        c.cam_pos_x = W-pw > 0 ? nx/(W-pw) : 0.5;
+        c.cam_pos_y = H-ph > 0 ? ny/(H-ph) : 0.65;
+        c.cam_pos = 'pip_custom';
+        applyLayout();
+        return;
+      }
+    }
+
+    // Hover cursor feedback
+    if(c.layout === 'stack'){
+      const th = Math.round(H * (c.split_ratio || 0.5));
+      if(Math.abs(my - th) <= 14){
+        cv.style.cursor = 'row-resize';
+      } else if(my < th){
+        cv.style.cursor = 'grab';
+      } else {
+        cv.style.cursor = 'ew-resize';
+      }
       return;
     }
-    if(!S.camBox)return;
-    const b=S.camBox;
-    let inside=false;
-    if(b.shape==='circle'){
-      inside=Math.hypot(mx-(b.x+b.w/2), my-(b.y+b.h/2)) <= Math.min(b.w,b.h)/2+10;
-    }else{
-      inside=mx>=b.x-6 && mx<=b.x+b.w+6 && my>=b.y-6 && my<=b.y+b.h+6;
+
+    if(c.layout === 'pip' && S.camBox){
+      const b=S.camBox;
+      let inside = false;
+      if(b.shape==='circle'){
+        inside = Math.hypot(mx-(b.x+b.w/2), my-(b.y+b.h/2)) <= Math.min(b.w,b.h)/2+10;
+      }else{
+        inside = mx>=b.x-6 && mx<=b.x+b.w+6 && my>=b.y-6 && my<=b.y+b.h+6;
+      }
+      cv.style.cursor = inside ? 'grab' : 'ew-resize';
+      return;
     }
-    cv.style.cursor=inside?'grab':'default';
+
+    cv.style.cursor = 'ew-resize';
   };
 
   cv.onpointerup=cv.onpointercancel=async e=>{
-    if(S.camDrag){
-      cv.style.cursor='grab';
-      if(S.camDrag.moved){
+    if(!S.canvasDrag) return;
+    const d=S.canvasDrag;
+    S.canvasDrag = null;
+
+    if(d.moved){
+      if(d.mode === 'split'){
+        await save({ split_ratio: S.clip.split_ratio });
+        toast('Split ratio saved.');
+      } else if(d.mode === 'cam_pan'){
+        await save({ cam_crop_x: S.clip.cam_crop_x, cam_crop_y: S.clip.cam_crop_y });
+        toast('Streamer framing adjusted.');
+      } else if(d.mode === 'game_pan'){
+        await save({ crop_x: S.clip.crop_x });
+        toast('Gameplay framing adjusted.');
+      } else if(d.mode === 'pip_cam'){
         await save({
           cam_pos_x: S.clip.cam_pos_x,
           cam_pos_y: S.clip.cam_pos_y,
           cam_pos: 'pip_custom',
           layout: 'pip'
         });
-        toast('Streamer position updated.');
+        toast('Streamer camera placed.');
       }
-      S.camDrag=null;
     }
   };
 }
@@ -1194,6 +1341,8 @@ function markSeg(){
   $('#res').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.r===c.res));
   if($('#camShape'))$('#camShape').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.shape===(c.cam_shape||'rect')));
   if($('#bannerStyle'))$('#bannerStyle').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.bs===(c.banner_style||'white_box')));
+  if($('#snapGrid'))$('#snapGrid').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.snap===(c.cam_corner||'tr')));
+  if($('#dualSplitBox'))$('#dualSplitBox').hidden = c.layout !== 'stack';
 }
 function updDur(){
   const c=S.clip;
@@ -1347,38 +1496,51 @@ function drawStack(v,f,c){
   }
   const g=cv.getContext('2d'),W=cv.width,H=cv.height;
   g.clearRect(0, 0, W, H);
-  const fw = f.w || v.videoWidth;
-  const k = v.videoWidth / fw;
-  let camBox = ((f.pip && f.box ? f.box : f.cam) || [fw*0.35, (f.h||v.videoHeight)*0.05, fw*0.3, (f.h||v.videoHeight)*0.3]).map(n=>n*k);
-  let [cx,cy,cw,ch]=camBox;
+  const vw = v.videoWidth, vh = v.videoHeight;
+  const fw = (f && f.w) || vw, fh = (f && f.h) || vh;
+  const k = vw / fw;
 
-  // Center-anchored streamer cam zoom
-  const zoom = Math.max(0.2, Math.min(3.0, c.cam_zoom || 1.0));
-  const boxCenterX = cx + cw / 2;
-  const boxCenterY = cy + ch / 2;
-  const zw = Math.min(v.videoWidth, cw / zoom);
-  const zh = Math.min(v.videoHeight, ch / zoom);
-  const zx = Math.max(0, Math.min(v.videoWidth - zw, boxCenterX - zw / 2));
-  const zy = Math.max(0, Math.min(v.videoHeight - zh, boxCenterY - zh / 2));
+  // Determine streamer source bounding box in source video
+  let box = null;
+  if(f && f.box) box = f.box;
+  else if(f && f.cam) box = f.cam;
+  else if(S.video && S.video.cam_box){
+    try { box = JSON.parse(S.video.cam_box); } catch(e){}
+  }
+  
+  if(!box){
+    const corner = c.cam_corner || 'tr';
+    if(corner === 'tl') box = [0, 0, Math.round(vw * 0.35), Math.round(vh * 0.50)];
+    else if(corner === 'bl') box = [0, Math.round(vh * 0.45), Math.round(vw * 0.35), Math.round(vh * 0.55)];
+    else if(corner === 'br') box = [Math.round(vw * 0.65), Math.round(vh * 0.45), Math.round(vw * 0.35), Math.round(vh * 0.55)];
+    else if(corner === 'tc') box = [Math.round(vw * 0.325), 0, Math.round(vw * 0.35), Math.round(vh * 0.50)];
+    else if(corner === 'bc') box = [Math.round(vw * 0.325), Math.round(vh * 0.45), Math.round(vw * 0.35), Math.round(vh * 0.55)];
+    else box = [Math.round(vw * 0.65), 0, Math.round(vw * 0.35), Math.round(vh * 0.50)];
+  }
+  
+  let [cx, cy, cw, ch] = box.map(n => Math.round(n * k));
+  cw = Math.max(32, Math.min(vw, cw));
+  ch = Math.max(32, Math.min(vh, ch));
+  cx = Math.max(0, Math.min(vw - cw, cx));
+  cy = Math.max(0, Math.min(vh - ch, cy));
 
-  const isPip = c.layout === 'pip' || (c.cam_pos && c.cam_pos.startsWith('pip'));
-  const isBottom = c.cam_pos === 'bottom';
+  const isPip = c.layout === 'pip';
   const shape = c.cam_shape || 'rect';
-  const vh = v.videoHeight;
+  const zoom = Math.max(0.4, Math.min(3.0, c.cam_zoom || 1.0));
 
   if(isPip){
     // 1. Blurred background filling the 9:16 phone
     g.save();
     g.filter = 'blur(16px) brightness(0.65)';
-    const bgScale = Math.max(W / v.videoWidth, H / vh);
-    const bgW = v.videoWidth * bgScale, bgH = vh * bgScale;
+    const bgScale = Math.max(W / vw, H / vh);
+    const bgW = vw * bgScale, bgH = vh * bgScale;
     g.drawImage(v, (W - bgW) / 2, (H - bgH) / 2, bgW, bgH);
     g.restore();
 
     // 2. Crisp 16:9 gameplay centered
-    const gh = Math.round(W * vh / v.videoWidth);
+    const gh = Math.round(W * vh / vw);
     const gy = Math.round((H - gh) / 2);
-    g.drawImage(v, 0, 0, v.videoWidth, vh, 0, gy, W, gh);
+    g.drawImage(v, 0, 0, vw, vh, 0, gy, W, gh);
 
     // 3. Floating Streamer Reaction Camera
     const pw = Math.round(W * (shape === 'circle' ? 0.44 : 0.48));
@@ -1389,6 +1551,11 @@ function drawStack(v,f,c){
     else if(c.cam_pos === 'pip_center') py = Math.round((H - ph_cam) / 2);
 
     S.camBox = { x: px, y: py, w: pw, h: ph_cam, shape: shape };
+
+    const zw = Math.min(vw, cw / zoom);
+    const zh = Math.min(vh, ch / zoom);
+    const zx = Math.max(0, Math.min(vw - zw, cx + cw/2 - zw/2));
+    const zy = Math.max(0, Math.min(vh - zh, cy + ch/2 - zh/2));
 
     g.save();
     if(shape === 'circle'){
@@ -1439,72 +1606,65 @@ function drawStack(v,f,c){
     return;
   }
 
-  // Dual-cam stacked
-  if(isBottom){
-    // Gameplay on top (60%), streamer bottom (40%)
-    const gh = Math.round(H * 0.58), ch_dst = H - gh;
-    const gw = Math.min(v.videoWidth, vh * W / gh), gx = (v.videoWidth - gw) * (c.crop_x ?? 0.5);
-    g.drawImage(v, gx, 0, gw, vh, 0, 0, W, gh);
+  // Dual-Cam Stack Mode: Splits into 2 stacked screens
+  const topShare = Math.max(0.25, Math.min(0.75, c.split_ratio || 0.5));
+  const th = Math.round(H * topShare), bh = H - th;
 
-    g.save();
-    if(shape === 'circle'){
-      g.fillStyle = '#0f1117';
-      g.fillRect(0, gh, W, ch_dst);
-      const diam = Math.min(W * 0.85, ch_dst * 0.95);
-      const cx_dst = (W - diam) / 2, cy_dst = gh + (ch_dst - diam) / 2;
-      S.camBox = { x: cx_dst, y: cy_dst, w: diam, h: diam, shape: shape };
-      g.beginPath();
-      g.arc(cx_dst + diam/2, cy_dst + diam/2, diam/2, 0, Math.PI * 2);
-      g.clip();
-      g.drawImage(v, zx, zy, zw, zh, cx_dst, cy_dst, diam, diam);
-      g.restore();
-      g.beginPath();
-      g.arc(cx_dst + diam/2, cy_dst + diam/2, diam/2, 0, Math.PI * 2);
-      g.strokeStyle = '#8c9bff';
-      g.lineWidth = 2;
-      g.stroke();
-    } else {
-      S.camBox = { x: 0, y: gh, w: W, h: ch_dst, shape: shape };
-      g.drawImage(v, zx, zy, zw, zh, 0, gh, W, ch_dst);
-      g.restore();
-    }
+  // 1. Lower Screen: Crisp Gameplay
+  const gameAspect = W / bh;
+  const gw = Math.min(vw, vh * gameAspect);
+  const gx = Math.max(0, Math.min(vw - gw, (vw - gw) * (c.crop_x ?? 0.5)));
+  g.drawImage(v, gx, 0, gw, vh, 0, th, W, bh);
+
+  // 2. Upper Screen: Streamer Reaction Camera
+  const topAspect = W / th;
+  let zw, zh;
+  if(cw / ch > topAspect){
+    zh = Math.min(vh, ch / zoom);
+    zw = Math.min(vw, zh * topAspect);
   } else {
-    // Streamer on top (default), gameplay below
-    const topShare = Math.max(0.25, Math.min(0.75, c.split_ratio || f?.top || 0.5));
-    const th = Math.round(H * topShare), bh = H - th;
-    const gw = Math.min(v.videoWidth, vh * W / bh), gx = (v.videoWidth - gw) * (c.crop_x ?? 0.5);
-    
-    // Lower screen: Gameplay
-    g.drawImage(v, gx, 0, gw, vh, 0, th, W, bh);
-
-    // Upper screen: Streamer reaction
-    g.save();
-    if(shape === 'circle'){
-      g.fillStyle = '#0f1117';
-      g.fillRect(0, 0, W, th);
-      const diam = Math.min(W * 0.9, th * 0.95);
-      const cx_dst = (W - diam) / 2, cy_dst = (th - diam) / 2;
-      S.camBox = { x: cx_dst, y: cy_dst, w: diam, h: diam, shape: shape };
-      g.beginPath();
-      g.arc(cx_dst + diam/2, cy_dst + diam/2, diam/2, 0, Math.PI * 2);
-      g.clip();
-      g.drawImage(v, zx, zy, zw, zh, cx_dst, cy_dst, diam, diam);
-      g.restore();
-      g.beginPath();
-      g.arc(cx_dst + diam/2, cy_dst + diam/2, diam/2, 0, Math.PI * 2);
-      g.strokeStyle = '#8c9bff';
-      g.lineWidth = 2.5;
-      g.stroke();
-    } else {
-      S.camBox = { x: 0, y: 0, w: W, h: th, shape: shape };
-      g.drawImage(v, zx, zy, zw, zh, 0, 0, W, th);
-      g.restore();
-    }
-
-    // Divider accent line between streamer and gameplay
-    g.fillStyle = '#6366f1';
-    g.fillRect(0, th - 1.5, W, 3);
+    zw = Math.min(vw, cw / zoom);
+    zh = Math.min(vh, zw / topAspect);
   }
+  const panX = typeof c.cam_crop_x === 'number' ? c.cam_crop_x : 0.5;
+  const panY = typeof c.cam_crop_y === 'number' ? c.cam_crop_y : 0.5;
+  const zx = Math.max(0, Math.min(vw - zw, cx + (cw - zw) * panX));
+  const zy = Math.max(0, Math.min(vh - zh, cy + (ch - zh) * panY));
+
+  g.save();
+  if(shape === 'circle'){
+    g.fillStyle = '#0d111a';
+    g.fillRect(0, 0, W, th);
+    const diam = Math.min(W * 0.88, th * 0.92);
+    const cx_dst = (W - diam) / 2, cy_dst = (th - diam) / 2;
+    g.beginPath();
+    g.arc(cx_dst + diam/2, cy_dst + diam/2, diam/2, 0, Math.PI * 2);
+    g.clip();
+    g.drawImage(v, zx, zy, zw, zh, cx_dst, cy_dst, diam, diam);
+    g.restore();
+    g.beginPath();
+    g.arc(cx_dst + diam/2, cy_dst + diam/2, diam/2, 0, Math.PI * 2);
+    g.strokeStyle = '#8c9bff';
+    g.lineWidth = 3;
+    g.stroke();
+  } else {
+    g.drawImage(v, zx, zy, zw, zh, 0, 0, W, th);
+    g.restore();
+  }
+
+  // 3. Divider Accent Line between Streamer and Gameplay
+  g.fillStyle = '#6366f1';
+  g.fillRect(0, th - 2, W, 4);
+  
+  // Center Grip Pill
+  g.fillStyle = '#ffffff';
+  g.beginPath();
+  if(typeof g.roundRect === 'function'){
+    g.roundRect(W / 2 - 20, th - 3.5, 40, 7, 3);
+  } else {
+    g.fillRect(W / 2 - 20, th - 3.5, 40, 7);
+  }
+  g.fill();
 }
 
 function drawBlur(v,cv){

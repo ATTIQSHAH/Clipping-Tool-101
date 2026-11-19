@@ -26,7 +26,8 @@ create table if not exists clips(
   sfx text, hook_zoom integer default 1, emojis integer default 1, censor integer default 0,
   cam_zoom real default 1.0, cam_shape text default 'rect', cam_pos text default 'top',
   cam_pos_x real default 0.5, cam_pos_y real default 0.65, banner_text text default '', banner_style text default 'white_box',
-  split_ratio real default 0.5, cam_corner text default 'tr');
+  split_ratio real default 0.5, cam_corner text default 'tr',
+  cam_crop_x real default 0.5, cam_crop_y real default 0.5);
 create table if not exists jobs(
   id integer primary key, type text, ref_id integer, params text, status text,
   log text default '', error text, created real, started real, finished real);
@@ -64,6 +65,8 @@ MIGRATE = {
         ("banner_style", "text default 'white_box'"),
         ("split_ratio", "real default 0.5"),
         ("cam_corner", "text default 'tr'"),
+        ("cam_crop_x", "real default 0.5"),
+        ("cam_crop_y", "real default 0.5"),
     ],
 }
 

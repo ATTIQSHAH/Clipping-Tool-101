@@ -18,7 +18,7 @@ CLIP_FIELDS = {
     "title", "template", "layout", "res", "crop_x", "music", "sfx_intro", "sfx_peak",
     "captions", "status", "words", "hook_zoom", "emojis", "censor", "sfx",
     "cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style",
-    "split_ratio", "cam_corner"
+    "split_ratio", "cam_corner", "cam_crop_x", "cam_crop_y"
 }
 
 
@@ -401,10 +401,12 @@ def patch_clip(cid: int, body: dict = Body(...)):
         sets.append(f"{k}=?")
         if k in ("res", "captions", "hook_zoom", "emojis", "censor"):
             vals.append(int(val))
-        elif k in ("crop_x", "cam_zoom", "cam_pos_x", "cam_pos_y", "split_ratio"):
+        elif k in ("crop_x", "cam_zoom", "cam_pos_x", "cam_pos_y", "split_ratio", "cam_crop_x", "cam_crop_y"):
             vals.append(float(val))
         else:
             vals.append(str(val) if val is not None else "")
+    if "cam_corner" in body or "layout" in body:
+        sets.append("cam=null")
     if "start" in body or "end" in body:
         limit = v["duration"] if not c["src"] else (c["we"] or v["duration"])
         s, e = float(body.get("start", c["start"])), float(body.get("end", c["end"]))

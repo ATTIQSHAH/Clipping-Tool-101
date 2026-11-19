@@ -396,20 +396,45 @@ def get_track(job, clip, video):
 def get_cam(job, clip, video):
     """Facecam box for the stacked layout (cached until the clip's start or end changes).
     A box drawn by hand on the video wins over detection for all its clips."""
+    w, h = video.get("w") or 1280, video.get("h") or 720
     if video.get("cam_box"):
-        x, y, w, h = json.loads(video["cam_box"])
-        return {"cam": faces.fit_panel(x, y, w, h, x + w / 2, y + h / 2), "box": [x, y, w, h], "kind": "facecam",
-                "exact": True, "manual": True}
-    if clip["cam"]:
-        c = json.loads(clip["cam"])
-        if "box" in c and abs(c["start"] - clip["start"]) < 0.01 and abs(c["end"] - clip["end"]) < 0.01:
-            return c
+        try:
+            x, y, bw, bh = json.loads(video["cam_box"])
+            return {"cam": faces.fit_panel(x, y, bw, bh, x + bw / 2, y + bh / 2), "box": [x, y, bw, bh], "kind": "facecam",
+                    "exact": True, "manual": True}
+        except Exception:
+            pass
+
+    corner = clip.get("cam_corner")
+    if corner and corner in ("tl", "tr", "bl", "br", "tc", "bc"):
+        if corner == "tl":
+            box = [0, 0, int(w * 0.35), int(h * 0.50)]
+        elif corner == "bl":
+            box = [0, int(h * 0.45), int(w * 0.35), int(h * 0.55)]
+        elif corner == "br":
+            box = [int(w * 0.65), int(h * 0.45), int(w * 0.35), int(h * 0.55)]
+        elif corner == "tc":
+            box = [int(w * 0.325), 0, int(w * 0.35), int(h * 0.50)]
+        elif corner == "bc":
+            box = [int(w * 0.325), int(h * 0.45), int(w * 0.35), int(h * 0.55)]
+        else: # tr
+            box = [int(w * 0.65), 0, int(w * 0.35), int(h * 0.50)]
+        return {"cam": faces.fit_panel(box[0], box[1], box[2], box[3], box[0] + box[2] / 2, box[1] + box[3] / 2),
+                "box": box, "kind": "facecam", "exact": True, "manual": True}
+
+    if clip.get("cam"):
+        try:
+            c = json.loads(clip["cam"])
+            if "box" in c and abs(c.get("start", 0) - clip["start"]) < 0.01 and abs(c.get("end", 0) - clip["end"]) < 0.01:
+                return c
+        except Exception:
+            pass
     other = db.q("select cam from clips where video_id=? and cam is not null and cam != '' and id != ? limit 1",
                  (clip["video_id"], clip["id"]), one=True)
     if other and other["cam"]:
         try:
             c = json.loads(other["cam"])
-            if c.get("box") and c.get("kind") == "facecam":
+            if c.get("box") and c.get("kind") == "facecam" and c.get("exact"):
                 c["start"], c["end"] = clip["start"], clip["end"]
                 db.ex("update clips set cam=? where id=?", (db.dumps(c), clip["id"]))
                 return c
@@ -420,7 +445,7 @@ def get_cam(job, clip, video):
     c = faces.find_facecam(which("ffmpeg"), clip_source(clip, video), video["w"], video["h"], clip["start"], clip["end"])
     c["start"], c["end"] = clip["start"], clip["end"]
     db.ex("update clips set cam=? where id=?", (db.dumps(c), clip["id"]))
-    if not video.get("cam_box") and c.get("kind") == "facecam" and c.get("box"):
+    if not video.get("cam_box") and c.get("kind") == "facecam" and c.get("box") and c.get("exact"):
         try:
             db.ex("update videos set cam_box=? where id=? and cam_box is null", (db.dumps(c["box"]), video["id"]))
         except Exception:
@@ -430,7 +455,7 @@ def get_cam(job, clip, video):
 
 def framing(clip, video):
     """What the browser preview needs to mimic the face-following crop or the stacked layout."""
-    if clip["layout"] in ("stack", "pip") or (clip.get("cam_pos") and str(clip["cam_pos"]).startswith("pip")):
+    if clip["layout"] in ("stack", "pip"):
         c = get_cam(None, clip, video)
         w, h = video["w"] or 1280, video["h"] or 720
         cam_box = c.get("box")
@@ -438,26 +463,31 @@ def framing(clip, video):
         if not cam_box or not cam_crop:
             corner = clip.get("cam_corner") or "tr"
             if corner == "tl":
-                cam_box = [0, 0, int(w * 0.35), int(h * 0.45)]
+                cam_box = [0, 0, int(w * 0.35), int(h * 0.50)]
             elif corner == "bl":
-                cam_box = [0, int(h * 0.55), int(w * 0.35), int(h * 0.45)]
+                cam_box = [0, int(h * 0.45), int(w * 0.35), int(h * 0.55)]
             elif corner == "br":
-                cam_box = [int(w * 0.65), int(h * 0.55), int(w * 0.35), int(h * 0.45)]
+                cam_box = [int(w * 0.65), int(h * 0.45), int(w * 0.35), int(h * 0.55)]
             elif corner == "tc":
-                cam_box = [int(w * 0.325), 0, int(w * 0.35), int(h * 0.45)]
+                cam_box = [int(w * 0.325), 0, int(w * 0.35), int(h * 0.50)]
+            elif corner == "bc":
+                cam_box = [int(w * 0.325), int(h * 0.45), int(w * 0.35), int(h * 0.55)]
             elif corner == "center":
                 cam_box = [int(w * 0.25), int(h * 0.15), int(w * 0.5), int(h * 0.6)]
             else:
-                cam_box = [int(w * 0.65), 0, int(w * 0.35), int(h * 0.45)]
+                cam_box = [int(w * 0.65), 0, int(w * 0.35), int(h * 0.50)]
             cam_crop = faces.fit_panel(cam_box[0], cam_box[1], cam_box[2], cam_box[3],
                                        cam_box[0] + cam_box[2] / 2, cam_box[1] + cam_box[3] / 2)
         split_ratio = float(clip.get("split_ratio") or 0.5)
-        return {"stack": True, "pip": clip["layout"] == "pip" or str(clip.get("cam_pos", "")).startswith("pip"),
+        return {"stack": clip["layout"] == "stack", "pip": clip["layout"] == "pip",
                 "size": faces.PIP_SIZE, "ptop": faces.PIP_TOP,
                 "kind": c.get("kind") or "facecam", "cam": cam_crop, "box": cam_box, "w": w, "h": h,
                 "top": split_ratio, "split_ratio": split_ratio, "found": 1.0, "pts": [], "manual": bool(c.get("manual")),
                 "cam_zoom": float(clip.get("cam_zoom") or 1.0),
+                "cam_crop_x": float(clip.get("cam_crop_x") if clip.get("cam_crop_x") is not None else 0.5),
+                "cam_crop_y": float(clip.get("cam_crop_y") if clip.get("cam_crop_y") is not None else 0.5),
                 "cam_shape": clip.get("cam_shape") or "rect",
+                "cam_corner": clip.get("cam_corner") or "tr",
                 "cam_pos": clip.get("cam_pos") or "top",
                 "cam_pos_x": float(clip.get("cam_pos_x") or 0.5),
                 "cam_pos_y": float(clip.get("cam_pos_y") or 0.65),
@@ -562,5 +592,8 @@ def render(job, clip_id, p):
                 cam_pos=c.get("cam_pos") or "top",
                 cam_pos_x=float(c.get("cam_pos_x") or 0.5),
                 cam_pos_y=float(c.get("cam_pos_y") or 0.65),
-                split_ratio=float(c.get("split_ratio") or 0.5))
+                split_ratio=float(c.get("split_ratio") or 0.5),
+                cam_crop_x=float(c.get("cam_crop_x") if c.get("cam_crop_x") is not None else 0.5),
+                cam_crop_y=float(c.get("cam_crop_y") if c.get("cam_crop_y") is not None else 0.5),
+                cam_corner=c.get("cam_corner") or "tr")
     db.ex("update clips set render_status='done', render_progress=100, render_path=? where id=?", (out, clip_id))

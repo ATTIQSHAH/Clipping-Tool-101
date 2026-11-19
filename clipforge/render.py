@@ -38,7 +38,8 @@ def _audio_graph(music, music_vol, duck, sfx, first_input):
 def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="follow", crop_x=0.5,
                 encoder="libx264", fps=30, res=1080, music=None, music_vol=0.18, duck=True, sfx=(),
                 track=None, hook_zoom=True, on_progress=None,
-                cam_zoom=1.0, cam_shape="rect", cam_pos="top", cam_pos_x=0.5, cam_pos_y=0.65, split_ratio=0.5):
+                cam_zoom=1.0, cam_shape="rect", cam_pos="top", cam_pos_x=0.5, cam_pos_y=0.65, split_ratio=0.5,
+                cam_crop_x=0.5, cam_crop_y=0.5, cam_corner="tr"):
     W, H = RES[res]
     w, h = info["w"], info["h"]
     s = max(0.0, float(start))
@@ -55,10 +56,10 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
     # Hook zoom effect: subtle kinetic punch zoom over the first 3.2 seconds
     zoom = f",scale=eval=frame:w='if(lte(t,3.2),{W}*(1.07-0.07*t/3.2),{W})':h='if(lte(t,3.2),{H}*(1.07-0.07*t/3.2),{H})',crop={W}:{H}" if hook_zoom else ""
 
-    cam = (track or {}).get("cam") if (layout in ("stack", "pip") or cam_pos.startswith("pip")) else None
+    cam = (track or {}).get("cam") if layout in ("stack", "pip") else None
     if cam:
         cx, cy, cw_, ch_ = cam
-        cz = max(0.5, min(float(cam_zoom or 1.0), 3.0))
+        cz = max(0.4, min(float(cam_zoom or 1.0), 3.0))
         if cz != 1.0:
             zw = int(cw_ / cz) // 2 * 2
             zh = int(ch_ / cz) // 2 * 2
@@ -67,7 +68,7 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
             cw_, ch_ = zw, zh
         cam = [cx, cy, cw_, ch_]
 
-    is_pip = layout == "pip" or cam_pos.startswith("pip")
+    is_pip = layout == "pip"
     if is_pip and cam and w / h > 9 / 16 + 0.01:
         from .faces import PIP_SIZE, PIP_TOP
         gw = int(h * 9 / 16) // 2 * 2
@@ -111,28 +112,46 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         gw = min(w, int(h * W / bh)) // 2 * 2
         gx = int((w - gw) * min(max(crop_x, 0), 1)) // 2 * 2
         if not cam:
-            corner = cam_pos or "tr"
+            corner = cam_corner or cam_pos or "tr"
             if corner == "tl":
-                cx, cy, cw_, ch_ = 0, 0, int(w * 0.35), int(h * 0.45)
+                cx, cy, cw_, ch_ = 0, 0, int(w * 0.35), int(h * 0.50)
             elif corner == "bl":
-                cx, cy, cw_, ch_ = 0, int(h * 0.55), int(w * 0.35), int(h * 0.45)
+                cx, cy, cw_, ch_ = 0, int(h * 0.45), int(w * 0.35), int(h * 0.55)
             elif corner == "br":
-                cx, cy, cw_, ch_ = int(w * 0.65), int(h * 0.55), int(w * 0.35), int(h * 0.45)
+                cx, cy, cw_, ch_ = int(w * 0.65), int(h * 0.45), int(w * 0.35), int(h * 0.55)
             elif corner == "tc":
-                cx, cy, cw_, ch_ = int(w * 0.325), 0, int(w * 0.35), int(h * 0.45)
+                cx, cy, cw_, ch_ = int(w * 0.325), 0, int(w * 0.35), int(h * 0.50)
+            elif corner == "bc":
+                cx, cy, cw_, ch_ = int(w * 0.325), int(h * 0.45), int(w * 0.35), int(h * 0.55)
             else: # "tr" default
-                cx, cy, cw_, ch_ = int(w * 0.65), 0, int(w * 0.35), int(h * 0.45)
+                cx, cy, cw_, ch_ = int(w * 0.65), 0, int(w * 0.35), int(h * 0.50)
         else:
             cx, cy, cw_, ch_ = cam
+
+        cz = max(0.4, min(float(cam_zoom or 1.0), 3.0))
+        top_aspect = W / th
+        if cw_ / ch_ > top_aspect:
+            sch = int(ch_ / cz) // 2 * 2
+            scw = int(sch * top_aspect) // 2 * 2
+        else:
+            scw = int(cw_ / cz) // 2 * 2
+            sch = int(scw / top_aspect) // 2 * 2
+        scw = min(w, max(64, scw))
+        sch = min(h, max(64, sch))
+
+        px = max(0.0, min(1.0, float(cam_crop_x if cam_crop_x is not None else 0.5)))
+        py = max(0.0, min(1.0, float(cam_crop_y if cam_crop_y is not None else 0.5)))
+        scx = int(min(max(cx + (cw_ - scw) * px, 0), w - scw)) // 2 * 2
+        scy = int(min(max(cy + (ch_ - sch) * py, 0), h - sch)) // 2 * 2
 
         if cam_pos == "bottom":
             # Streamer on bottom, gameplay on top
             fc = (f"[0:v]split[a][b];[b]crop={gw}:{h}:{gx}:0,scale={W}:{bh}:flags=lanczos[top];"
-                  f"[a]crop={cw_}:{ch_}:{cx}:{cy},scale={W}:{th}:flags=lanczos[bot];"
+                  f"[a]crop={scw}:{sch}:{scx}:{scy},scale={W}:{th}:flags=lanczos[bot];"
                   f"[top][bot]vstack,setsar=1{zoom},ass={ass}[v]")
         else:
             # Streamer on top (default), gameplay on bottom
-            fc = (f"[0:v]split[a][b];[a]crop={cw_}:{ch_}:{cx}:{cy},scale={W}:{th}:flags=lanczos[top];"
+            fc = (f"[0:v]split[a][b];[a]crop={scw}:{sch}:{scx}:{scy},scale={W}:{th}:flags=lanczos[top];"
                   f"[b]crop={gw}:{h}:{gx}:0,scale={W}:{bh}:flags=lanczos[bot];"
                   f"[top][bot]vstack,setsar=1{zoom},ass={ass}[v]")
     elif layout in ("blur", "stack", "pip") or w / h <= 9 / 16 + 0.01:     # stack without a facecam: whole gameplay, blurred fill
