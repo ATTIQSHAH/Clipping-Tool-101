@@ -194,7 +194,7 @@ def add_link(body: dict = Body(...)):
         vid = db.ex("insert into videos(title,source,status,created,client_id,kind,stage) values(?,?,?,?,?,?,?)",
                     (u, u, "importing", db.now(), body.get("client_id"), "link", "Getting your video"))
         cookies_browser = body.get("cookies_browser") or db.setting("cookies_browser") or None
-        worker.enqueue("ingest", vid, {"max_height": body.get("max_height", 1080), "quick": bool(body.get("quick")),
+        worker.enqueue("ingest", vid, {"max_height": body.get("max_height", 1080), "quick": bool(body.get("quick", True)),
                                        "cookies_browser": cookies_browser,
                                        "then_analyze": _then(body)})
         ids.append(vid)
@@ -223,7 +223,7 @@ def retry_video(vid: int, body: dict = Body(default={})):
         cookies_browser = body.get("cookies_browser") or db.setting("cookies_browser") or None
         worker.enqueue("ingest", vid, {
             "max_height": body.get("max_height", 1080),
-            "quick": bool(body.get("quick")),
+            "quick": bool(body.get("quick", True)),
             "cookies_browser": cookies_browser,
             "then_analyze": _then(body) or {"clips": body.get("clips", 20), "length": body.get("length", 30)}
         })

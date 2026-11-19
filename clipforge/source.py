@@ -15,6 +15,8 @@ def _impersonate_args():
 
 
 def _fmt(h):
+    if h <= 480:
+        return f"b[height<={h}][ext=mp4]/b[height<={h}]/bv*[height<={h}]+ba/b"
     return f"bv*[vcodec^=avc1][height<={h}]+ba[ext=m4a]/bv*[height<={h}]+ba/b[height<={h}]/b"
 
 
@@ -98,6 +100,7 @@ def download(job, url, outdir, max_height=1080, cookies_browser=None, on_progres
                 state["parts"] += 1
 
         cmd = [ytdlp, "-f", fmt, "--merge-output-format", "mp4", "--write-info-json", "--no-playlist",
+               "--concurrent-fragments", "4", "--no-mtime", "--socket-timeout", "15", "--retries", "3",
                "-o", base + ".%(ext)s"] + extra + [url]
         job.run_lines(cmd, line)
     info = None
@@ -109,10 +112,13 @@ def download(job, url, outdir, max_height=1080, cookies_browser=None, on_progres
 
 def download_section(job, url, out, start, end, max_height=1080, cookies_browser=None):
     """Only start..end seconds of a link at full quality. The cut is exact, so the file starts at `start`."""
+    if end <= start:
+        raise RuntimeError(f"Cannot download section: end ({end:.2f}) must be after start ({start:.2f}).")
     if not os.path.exists(out):
         extra = _auth_args(cookies_browser)
         job.run([which("yt-dlp"), "-f", _fmt(max_height), "--merge-output-format", "mp4", "--no-playlist",
                  "--download-sections", f"*{start:.2f}-{end:.2f}", "--force-keyframes-at-cuts",
+                 "--concurrent-fragments", "4", "--no-mtime", "--socket-timeout", "15", "--retries", "3",
                  "-o", out] + extra + [url])
     return out
 

@@ -43,6 +43,8 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
     w, h = info["w"], info["h"]
     s = max(0.0, float(start))
     dur = max(0.5, float(end) - s)
+    if dur <= 0:
+        raise RuntimeError(f"Clip duration is non-positive ({float(end):.2f} - {s:.2f} = {dur:.2f}s). Check start/end times.")
     tmp = os.path.dirname(os.path.abspath(ass_path))
     ass = os.path.basename(ass_path)  # relative name avoids Windows 'C:' escaping problems
     

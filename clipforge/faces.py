@@ -4,6 +4,8 @@ import subprocess
 
 import numpy as np
 
+from .util import silent_flags
+
 _cascade = None
 
 
@@ -31,7 +33,10 @@ def _read_frames(ffmpeg, src, start, end, W, H, fps, sw=512):
     sh = _even(round(sw * H / W))
     cmd = [ffmpeg, "-nostdin", "-v", "error", "-ss", f"{s:.3f}", "-t", f"{dur:.3f}", "-i", src,
            "-vf", f"fps={fps},scale={sw}:{sh}", "-f", "rawvideo", "-pix_fmt", "gray", "-"]
-    raw = subprocess.run(cmd, capture_output=True).stdout
+    try:
+        raw = subprocess.run(cmd, capture_output=True, timeout=30, **silent_flags()).stdout
+    except Exception:
+        raw = b""
     n = len(raw) // (sw * sh)
     return np.frombuffer(raw[: n * sw * sh], dtype=np.uint8).reshape(n, sh, sw), sw / W
 
@@ -166,7 +171,7 @@ def find_facecam(ffmpeg, src, W, H, start, end, out_w=1080, out_h=1920):
     """Gaming streams: find a fixed facecam overlay. Returns {'cam': [x, y, w, h] | None, 'box': ..., 'kind': ...}
     in source px. 'box' is the whole overlay (pip layout); 'cam' is the part of it that fits the stacked top panel.
     kind 'facecam' = small steady face (overlay), 'camera' = big face (talking head, use follow instead), 'none'."""
-    frames, scale = _read_frames(ffmpeg, src, start, end, W, H, fps=1, sw=1024)   # small facecams need the detail
+    frames, scale = _read_frames(ffmpeg, src, start, end, W, H, fps=1, sw=512)
     det = _detector()
     groups, big = [], []                                  # each steady face: [(cx, cy, w), ...] in analysis px
     for g in frames:

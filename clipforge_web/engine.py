@@ -404,11 +404,27 @@ def get_cam(job, clip, video):
         c = json.loads(clip["cam"])
         if "box" in c and abs(c["start"] - clip["start"]) < 0.01 and abs(c["end"] - clip["end"]) < 0.01:
             return c
+    other = db.q("select cam from clips where video_id=? and cam is not null and cam != '' and id != ? limit 1",
+                 (clip["video_id"], clip["id"]), one=True)
+    if other and other["cam"]:
+        try:
+            c = json.loads(other["cam"])
+            if c.get("box") and c.get("kind") == "facecam":
+                c["start"], c["end"] = clip["start"], clip["end"]
+                db.ex("update clips set cam=? where id=?", (db.dumps(c), clip["id"]))
+                return c
+        except Exception:
+            pass
     if job:
         job.check()
     c = faces.find_facecam(which("ffmpeg"), clip_source(clip, video), video["w"], video["h"], clip["start"], clip["end"])
     c["start"], c["end"] = clip["start"], clip["end"]
     db.ex("update clips set cam=? where id=?", (db.dumps(c), clip["id"]))
+    if not video.get("cam_box") and c.get("kind") == "facecam" and c.get("box"):
+        try:
+            db.ex("update videos set cam_box=? where id=? and cam_box is null", (db.dumps(c["box"]), video["id"]))
+        except Exception:
+            pass
     return c
 
 
