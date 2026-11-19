@@ -17,7 +17,8 @@ EXTS = {".mp4", ".mov", ".mkv", ".webm"}
 CLIP_FIELDS = {
     "title", "template", "layout", "res", "crop_x", "music", "sfx_intro", "sfx_peak",
     "captions", "status", "words", "hook_zoom", "emojis", "censor", "sfx",
-    "cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style"
+    "cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style",
+    "split_ratio", "cam_corner"
 }
 
 
@@ -109,6 +110,8 @@ def _clip_out(c):
     o["censor"] = int(c["censor"]) if ("censor" in c and c["censor"] is not None) else 0
     o["sfx_peak"] = c.get("sfx_peak") or ""
     o["rendered"] = bool(c["render_path"] and os.path.exists(c["render_path"]))
+    o["split_ratio"] = float(c.get("split_ratio") or 0.5)
+    o["cam_corner"] = c.get("cam_corner") or "tr"
     if c["render_status"] == "failed":
         j = db.q("select error from jobs where type='render' and ref_id=? and status='failed' order by id desc limit 1",
                  (c["id"],), one=True)
@@ -398,7 +401,7 @@ def patch_clip(cid: int, body: dict = Body(...)):
         sets.append(f"{k}=?")
         if k in ("res", "captions", "hook_zoom", "emojis", "censor"):
             vals.append(int(val))
-        elif k in ("crop_x", "cam_zoom", "cam_pos_x", "cam_pos_y"):
+        elif k in ("crop_x", "cam_zoom", "cam_pos_x", "cam_pos_y", "split_ratio"):
             vals.append(float(val))
         else:
             vals.append(str(val) if val is not None else "")

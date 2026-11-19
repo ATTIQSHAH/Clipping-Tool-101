@@ -456,30 +456,102 @@ async function loadFraming(){
   applyLayout();
 }
 function camEditor(){
-  const v=$('#pv'),f=S.framing;if(!v||!v.videoWidth||!f)return;
-  const W=Math.min(innerWidth-32,900),k=W/f.w,H=Math.round(f.h*k);
-  let b=(f.box||[f.w*.35,f.h*.05,f.w*.3,f.h*.3]).map(n=>n*k),drag=null;
-  const m=document.createElement('div');m.className='modal';
-  m.innerHTML=`<div class="mbox"><h2>Facecam box</h2><p class="muted small">Drag the box over the facecam. Drag the corner dot to resize. Every clip from this video uses it.</p>
-    <canvas id="camcv" width="${W}" height="${H}" style="touch-action:none"></canvas>
-    <div class="row" style="margin-top:10px"><button id="camAuto" class="ghost">Use automatic</button><span style="flex:1"></span><button id="camNo">Cancel</button><button id="camOk" class="primary">Save box</button></div></div>`;
+  const v=$('#pv');
+  if(!v)return;
+  const vw = v.videoWidth || (S.video && S.video.w) || 1280;
+  const vh = v.videoHeight || (S.video && S.video.h) || 720;
+  const f = S.framing || {};
+  const W = Math.min(innerWidth - 32, 900);
+  const k = W / vw, H = Math.round(vh * k);
+  let initial = f.box || (S.video && S.video.cam_box ? JSON.parse(S.video.cam_box) : null) || [Math.round(vw * 0.65), 0, Math.round(vw * 0.35), Math.round(vh * 0.45)];
+  let b = initial.map(n => n * k), drag = null;
+  const m = document.createElement('div'); m.className = 'modal';
+  m.innerHTML = `<div class="mbox" style="max-width:940px">
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h2 style="margin:0">🎯 Select Streamer Reaction Box</h2>
+      <button id="camCloseX" class="ghost" style="font-size:16px">✕</button>
+    </div>
+    <p class="muted small" style="margin:0 0 10px">Drag the blue box over the streamer's reaction camera in the video. Drag the corner dot to resize.</p>
+    <div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <span class="small" style="font-weight:700;display:flex;align-items:center">Presets:</span>
+      <button class="small" id="camSetTL">↖ Top-Left</button>
+      <button class="small" id="camSetTR">↗ Top-Right</button>
+      <button class="small" id="camSetBL">↙ Bottom-Left</button>
+      <button class="small" id="camSetBR">↘ Bottom-Right</button>
+      <button class="small" id="camSetCenter">🎯 Center</button>
+    </div>
+    <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;border:1px solid #334155">
+      <canvas id="camcv" width="${W}" height="${H}" style="touch-action:none;display:block;width:100%"></canvas>
+    </div>
+    <div class="row" style="margin-top:14px;gap:10px">
+      <button id="camAuto" class="ghost">Auto-detect</button>
+      <span style="flex:1"></span>
+      <button id="camNo" class="ghost">Cancel</button>
+      <button id="camOk" class="primary" style="font-weight:700">✓ Apply Streamer Box</button>
+    </div>
+  </div>`;
   document.body.appendChild(m);
-  const cv=m.querySelector('#camcv'),g=cv.getContext('2d');
-  const draw=()=>{g.drawImage(v,0,0,W,H);g.fillStyle='#0008';g.fillRect(0,0,W,H);g.drawImage(v,b[0]/k,b[1]/k,b[2]/k,b[3]/k,b[0],b[1],b[2],b[3]);
-    g.strokeStyle='#8c9bff';g.lineWidth=2;g.strokeRect(b[0],b[1],b[2],b[3]);g.fillStyle='#8c9bff';g.beginPath();g.arc(b[0]+b[2],b[1]+b[3],8,0,7);g.fill()};
-  const pt=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height]};
-  cv.onpointerdown=e=>{const[x,y]=pt(e);cv.setPointerCapture(e.pointerId);
-    drag=Math.hypot(x-b[0]-b[2],y-b[1]-b[3])<16?{rs:1}:(x>b[0]&&x<b[0]+b[2]&&y>b[1]&&y<b[1]+b[3])?{dx:x-b[0],dy:y-b[1]}:null};
-  cv.onpointermove=e=>{if(!drag)return;const[x,y]=pt(e),min=32*k;
-    if(drag.rs){b[2]=Math.min(Math.max(x-b[0],min),W-b[0]);b[3]=Math.min(Math.max(y-b[1],min),H-b[1])}
-    else{b[0]=Math.min(Math.max(x-drag.dx,0),W-b[2]);b[1]=Math.min(Math.max(y-drag.dy,0),H-b[3])}draw()};
-  cv.onpointerup=()=>drag=null;
-  const done=async box=>{await send('PATCH','/api/videos/'+S.vid,{cam_box:box});m.remove();S.framing=null;await loadClips();loadFraming();toast(box?'Facecam box saved for every clip of this video.':'Back to automatic facecam finding.')};
-  m.querySelector('#camOk').onclick=guard(()=>done(b.map(n=>Math.round(n/k))));
-  m.querySelector('#camAuto').onclick=guard(()=>done(null));
-  m.querySelector('#camNo').onclick=()=>m.remove();
-  m.onkeydown=e=>{if(e.key==='Escape')m.remove()};
-  draw();m.querySelector('#camOk').focus();
+  const cv = m.querySelector('#camcv'), g = cv.getContext('2d');
+  const draw = () => {
+    g.drawImage(v, 0, 0, W, H);
+    g.fillStyle = '#0008';
+    g.fillRect(0, 0, W, H);
+    g.drawImage(v, b[0] / k, b[1] / k, b[2] / k, b[3] / k, b[0], b[1], b[2], b[3]);
+    g.strokeStyle = '#8c9bff';
+    g.lineWidth = 2.5;
+    g.strokeRect(b[0], b[1], b[2], b[3]);
+    g.fillStyle = '#8c9bff';
+    g.beginPath();
+    g.arc(b[0] + b[2], b[1] + b[3], 9, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#fff';
+    g.font = 'bold 11px sans-serif';
+    g.fillText('Streamer Cam', b[0] + 6, b[1] + 16);
+  };
+  const pt = e => {
+    const r = cv.getBoundingClientRect();
+    return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height];
+  };
+  cv.onpointerdown = e => {
+    const [x, y] = pt(e);
+    cv.setPointerCapture(e.pointerId);
+    drag = Math.hypot(x - b[0] - b[2], y - b[1] - b[3]) < 20 ? { rs: 1 } : (x > b[0] && x < b[0] + b[2] && y > b[1] && y < b[1] + b[3]) ? { dx: x - b[0], dy: y - b[1] } : null;
+  };
+  cv.onpointermove = e => {
+    if (!drag) return;
+    const [x, y] = pt(e), min = 32 * k;
+    if (drag.rs) {
+      b[2] = Math.min(Math.max(x - b[0], min), W - b[0]);
+      b[3] = Math.min(Math.max(y - b[1], min), H - b[1]);
+    } else {
+      b[0] = Math.min(Math.max(x - drag.dx, 0), W - b[2]);
+      b[1] = Math.min(Math.max(y - drag.dy, 0), H - b[3]);
+    }
+    draw();
+  };
+  cv.onpointerup = () => drag = null;
+
+  m.querySelector('#camSetTL').onclick = () => { b = [0, 0, W * 0.35, H * 0.45]; draw(); };
+  m.querySelector('#camSetTR').onclick = () => { b = [W * 0.65, 0, W * 0.35, H * 0.45]; draw(); };
+  m.querySelector('#camSetBL').onclick = () => { b = [0, H * 0.55, W * 0.35, H * 0.45]; draw(); };
+  m.querySelector('#camSetBR').onclick = () => { b = [W * 0.65, H * 0.55, W * 0.35, H * 0.45]; draw(); };
+  m.querySelector('#camSetCenter').onclick = () => { b = [W * 0.25, H * 0.15, W * 0.5, H * 0.6]; draw(); };
+
+  const done = async box => {
+    await send('PATCH', '/api/videos/' + S.vid, { cam_box: box });
+    m.remove();
+    S.framing = null;
+    await loadClips();
+    await loadFraming();
+    applyLayout();
+    toast(box ? 'Streamer camera box updated!' : 'Switched back to automatic camera finding.');
+  };
+  m.querySelector('#camOk').onclick = guard(() => done(b.map(n => Math.round(n / k))));
+  m.querySelector('#camAuto').onclick = guard(() => done(null));
+  m.querySelector('#camNo').onclick = () => m.remove();
+  m.querySelector('#camCloseX').onclick = () => m.remove();
+  m.onkeydown = e => { if (e.key === 'Escape') m.remove(); };
+  draw();
 }
 async function save(patch){
   const c=await send('PATCH','/api/clips/'+S.cid,patch);Object.assign(S.clip,c);await loadClips();drawCands();drawMap();updateApproveUI();return c;
@@ -532,11 +604,46 @@ function buildEditor(){
         <!-- Panel 1: Cam & Framing -->
         <div class="studio-panel on" id="spanel-cam">
           <div>
-            <label>Cam Frame Shape</label>
-            <div class="seg" id="camShape">
-              <button data-shape="rect">⬛ Rectangle Frame</button>
-              <button data-shape="circle">⭕ Circle Frame</button>
+            <label>Framing Mode</label>
+            <div class="seg" id="layout">
+              <button data-l="stack">🎮 Dual-Cam Split</button>
+              <button data-l="pip">🎮 Floating Cam (Draggable)</button>
+              <button data-l="follow">Follow Face</button>
+              <button data-l="crop">Center Crop</button>
+              <button data-l="blur">Blurred Fit</button>
             </div>
+            <p class="muted small" style="margin:4px 0 0" id="layoutDesc"><b>Dual-Cam Split:</b> Splits vertically into 2 screens. Top captures streamer reaction, bottom captures gameplay.</p>
+          </div>
+
+          <!-- Dual-Cam Split Ratio (Top / Bottom) -->
+          <div id="dualSplitBox" style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0;font-weight:700">Dual-Cam Split Ratio:</label>
+              <b id="splitVal" style="color:var(--accent);font-size:13px">${Math.round((c.split_ratio || 0.5) * 100)}% Top / ${Math.round((1 - (c.split_ratio || 0.5)) * 100)}% Bottom</b>
+            </div>
+            <div class="seg" id="splitPresets" style="margin:6px 0">
+              <button data-split="0.5" class="${(c.split_ratio||0.5)===0.5?'on':''}">50 / 50</button>
+              <button data-split="0.45" class="${c.split_ratio===0.45?'on':''}">45 / 55</button>
+              <button data-split="0.4" class="${c.split_ratio===0.4?'on':''}">40 / 60</button>
+              <button data-split="0.35" class="${c.split_ratio===0.35?'on':''}">35 / 65</button>
+              <button data-split="0.6" class="${c.split_ratio===0.6?'on':''}">60 / 40</button>
+            </div>
+            <input id="splitRatio" type="range" min="0.25" max="0.75" step="0.05" value="${c.split_ratio || 0.5}">
+            <div class="row muted small"><span>25% Top</span><span style="flex:1;text-align:center">50% Equal Split</span><span>75% Top</span></div>
+          </div>
+
+          <!-- Streamer Camera Source Selection -->
+          <div class="card" style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px">
+            <label style="margin:0;font-weight:700">Select Where Streamer Is in the Video:</label>
+            <div class="snap-grid" id="snapGrid" style="margin:6px 0">
+              <button data-snap="tl">↖ Top-Left (Speed)</button>
+              <button data-snap="tr">↗ Top-Right (Kai/Jynxzi)</button>
+              <button data-snap="bl">↙ Bottom-Left</button>
+              <button data-snap="br">↘ Bottom-Right</button>
+              <button data-snap="tc" style="grid-column:span 2">⬆ Top-Center</button>
+            </div>
+            <button id="camEdit" class="primary fit" style="width:100%;margin-top:6px;font-weight:700;padding:7px 10px">🎯 Drag & Select Streamer Box on Video</button>
+            <div class="cam-drag-tip" style="margin-top:6px">Click button above to drag a box directly over the streamer's camera!</div>
           </div>
 
           <div>
@@ -546,38 +653,16 @@ function buildEditor(){
           </div>
 
           <div>
-            <label>Quick Corner Snaps</label>
-            <div class="snap-grid" id="snapGrid">
-              <button data-snap="tl">↖ Top-Left</button>
-              <button data-snap="tc">⬆ Top-Center</button>
-              <button data-snap="tr">↗ Top-Right</button>
-              <button data-snap="bl">↙ Bottom-Left</button>
-              <button data-snap="bc">⬇ Bottom-Center</button>
-              <button data-snap="br">↘ Bottom-Right</button>
-              <button data-snap="speed" style="grid-column:span 3;background:#6366f120;border-color:#6366f155;color:#fff">🎯 Speed Reaction (Lower Center)</button>
+            <label>Cam Frame Shape</label>
+            <div class="seg" id="camShape">
+              <button data-shape="rect">⬛ Rectangle Frame</button>
+              <button data-shape="circle">⭕ Circle Frame</button>
             </div>
-            <div class="cam-drag-tip">✥ You can also drag the camera directly on the video screen!</div>
-          </div>
-
-          <div>
-            <label>Framing Mode</label>
-            <div class="seg" id="layout">
-              <button data-l="pip">🎮 Floating Cam (Draggable)</button>
-              <button data-l="stack">🎮 Dual-Cam Split</button>
-              <button data-l="follow">Follow Face</button>
-              <button data-l="crop">Center Crop</button>
-              <button data-l="blur">Blurred Fit</button>
-            </div>
-            <p class="muted small" style="margin:4px 0 0" id="layoutDesc"><b>Floating Cam:</b> Streamer camera freely floats over the gameplay anywhere you drag it.</p>
           </div>
 
           <div>
             <label>Gameplay Horizontal Pan</label>
             <input id="cx" type="range" min="0" max="1" step="0.01" value="${c.crop_x}" aria-label="Crop position">
-          </div>
-
-          <div>
-            <button id="camEdit" class="fit" style="width:100%">🎯 Fine-tune facecam bounding box</button>
           </div>
         </div>
 
@@ -797,10 +882,32 @@ function buildEditor(){
     el.querySelectorAll('.studio-panel').forEach(p=>p.classList.toggle('on',p.id==='spanel-'+tab));
   };
 
-  // Quick Corner Snaps for Camera
+  // Quick Corner Snaps for Camera & Streamer Location
   $('#snapGrid').onclick=guard(async e=>{
     const b=e.target.closest('[data-snap]');if(!b)return;
     const s=b.dataset.snap;
+    const v=$('#pv');
+    const vw=v?.videoWidth || (S.video && S.video.w) || 1280;
+    const vh=v?.videoHeight || (S.video && S.video.h) || 720;
+    
+    if(S.clip.layout === 'stack'){
+      let box;
+      if(s==='tl') box=[0, 0, Math.round(vw*0.35), Math.round(vh*0.45)];
+      else if(s==='tr') box=[Math.round(vw*0.65), 0, Math.round(vw*0.35), Math.round(vh*0.45)];
+      else if(s==='bl') box=[0, Math.round(vh*0.55), Math.round(vw*0.35), Math.round(vh*0.45)];
+      else if(s==='br') box=[Math.round(vw*0.65), Math.round(vh*0.55), Math.round(vw*0.35), Math.round(vh*0.45)];
+      else if(s==='tc') box=[Math.round(vw*0.325), 0, Math.round(vw*0.35), Math.round(vh*0.45)];
+      else box=[Math.round(vw*0.65), 0, Math.round(vw*0.35), Math.round(vh*0.45)];
+      
+      await send('PATCH', '/api/videos/'+S.vid, {cam_box: box});
+      await save({cam_pos: s, cam_corner: s, layout: 'stack'});
+      S.framing = null;
+      await loadFraming();
+      applyLayout();
+      toast('Streamer location updated to '+s.toUpperCase());
+      return;
+    }
+
     let x=0.5, y=0.65;
     if(s==='tl'){ x=0.05; y=0.05; }
     else if(s==='tc'){ x=0.5; y=0.05; }
@@ -814,6 +921,30 @@ function buildEditor(){
     markSeg();applyLayout();
     toast('Camera snapped to position.');
   });
+
+  // Dual-Cam Split Ratio
+  const splitInp=$('#splitRatio'), splitVal=$('#splitVal');
+  if(splitInp){
+    splitInp.oninput=e=>{
+      const val=+e.target.value;
+      S.clip.split_ratio=val;
+      if(splitVal) splitVal.textContent = Math.round(val*100)+'% Top / '+Math.round((1-val)*100)+'% Bottom';
+      applyLayout();
+    };
+    splitInp.onchange=guard(e=>save({split_ratio:+e.target.value}));
+  }
+  if($('#splitPresets')){
+    $('#splitPresets').onclick=guard(async e=>{
+      const b=e.target.closest('[data-split]');if(!b)return;
+      const val=+b.dataset.split;
+      S.clip.split_ratio=val;
+      if(splitInp) splitInp.value=val;
+      if(splitVal) splitVal.textContent = Math.round(val*100)+'% Top / '+Math.round((1-val)*100)+'% Bottom';
+      $('#splitPresets').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+      await save({split_ratio:val});
+      applyLayout();
+    });
+  }
 
   // Camera Shape (Rect / Circle)
   $('#camShape').onclick=guard(async e=>{
@@ -1338,16 +1469,20 @@ function drawStack(v,f,c){
       g.restore();
     }
   } else {
-    // Streamer on top (40%), gameplay below (60%)
-    const th = Math.round(H * (f.top || 0.4)), bh = H - th;
+    // Streamer on top (default), gameplay below
+    const topShare = Math.max(0.25, Math.min(0.75, c.split_ratio || f?.top || 0.5));
+    const th = Math.round(H * topShare), bh = H - th;
     const gw = Math.min(v.videoWidth, vh * W / bh), gx = (v.videoWidth - gw) * (c.crop_x ?? 0.5);
+    
+    // Lower screen: Gameplay
     g.drawImage(v, gx, 0, gw, vh, 0, th, W, bh);
 
+    // Upper screen: Streamer reaction
     g.save();
     if(shape === 'circle'){
       g.fillStyle = '#0f1117';
       g.fillRect(0, 0, W, th);
-      const diam = Math.min(W * 0.85, th * 0.95);
+      const diam = Math.min(W * 0.9, th * 0.95);
       const cx_dst = (W - diam) / 2, cy_dst = (th - diam) / 2;
       S.camBox = { x: cx_dst, y: cy_dst, w: diam, h: diam, shape: shape };
       g.beginPath();
@@ -1358,13 +1493,17 @@ function drawStack(v,f,c){
       g.beginPath();
       g.arc(cx_dst + diam/2, cy_dst + diam/2, diam/2, 0, Math.PI * 2);
       g.strokeStyle = '#8c9bff';
-      g.lineWidth = 2;
+      g.lineWidth = 2.5;
       g.stroke();
     } else {
       S.camBox = { x: 0, y: 0, w: W, h: th, shape: shape };
       g.drawImage(v, zx, zy, zw, zh, 0, 0, W, th);
       g.restore();
     }
+
+    // Divider accent line between streamer and gameplay
+    g.fillStyle = '#6366f1';
+    g.fillRect(0, th - 1.5, W, 3);
   }
 }
 
@@ -1376,8 +1515,10 @@ function drawBlur(v,cv){
 
 function applyLayout(){
   const v=$('#pv');if(!v||!S.clip)return;const c=S.clip,f=S.framing;
-  const stack=['stack','pip'].includes(c.layout)&&f&&f.stack&&f.cam,cv=$('#stackcv');
-  const blur=v.videoWidth&&(c.layout==='blur'||(['stack','pip'].includes(c.layout)&&f&&f.stack&&!f.cam));
+  const isStackOrPip = ['stack','pip'].includes(c.layout);
+  const stack = isStackOrPip && v.videoWidth;
+  const cv=$('#stackcv');
+  const blur=v.videoWidth&&(c.layout==='blur'||(!isStackOrPip&&!['follow','crop'].includes(c.layout)));
   
   if(!stack && !blur){
     if(cv) cv.hidden=true;
@@ -1385,7 +1526,6 @@ function applyLayout(){
     v.style.objectFit='cover';
   } else {
     if(cv) cv.hidden=false;
-    // Keep video element visible underneath so Chromium continues frame decoding pipeline
     v.style.visibility='';
     if(v.readyState >= 1){
       if(stack) drawStack(v,f,c);
@@ -1395,7 +1535,7 @@ function applyLayout(){
       v.addEventListener('canplay',()=>applyLayout(),{once:true});
     }
   }
-  v.style.objectFit=(c.layout==='blur'||(['stack','pip'].includes(c.layout)&&f&&f.stack&&!f.cam))?'contain':'cover';
+  v.style.objectFit=(c.layout==='blur')?'contain':'cover';
   let x=.5;if(c.layout==='crop')x=c.crop_x;else if(c.layout==='follow'){const p=posAt(v.currentTime-c.start);x=p==null?.5:p}
   v.style.objectPosition=(x*100)+'% 50%';
 }

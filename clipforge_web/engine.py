@@ -432,18 +432,37 @@ def framing(clip, video):
     """What the browser preview needs to mimic the face-following crop or the stacked layout."""
     if clip["layout"] in ("stack", "pip") or (clip.get("cam_pos") and str(clip["cam_pos"]).startswith("pip")):
         c = get_cam(None, clip, video)
-        if c["kind"] != "camera":
-            return {"stack": True, "pip": clip["layout"] == "pip" or str(clip.get("cam_pos", "")).startswith("pip"),
-                    "size": faces.PIP_SIZE, "ptop": faces.PIP_TOP,
-                    "kind": c["kind"], "cam": c["cam"], "box": c["box"], "w": video["w"], "h": video["h"],
-                    "top": faces.TOP_SHARE, "found": 1.0 if c["cam"] else 0.0, "pts": [], "manual": bool(c.get("manual")),
-                    "cam_zoom": float(clip.get("cam_zoom") or 1.0),
-                    "cam_shape": clip.get("cam_shape") or "rect",
-                    "cam_pos": clip.get("cam_pos") or "top",
-                    "cam_pos_x": float(clip.get("cam_pos_x") or 0.5),
-                    "cam_pos_y": float(clip.get("cam_pos_y") or 0.65),
-                    "banner_text": clip.get("banner_text") or "",
-                    "banner_style": clip.get("banner_style") or "white_box"}
+        w, h = video["w"] or 1280, video["h"] or 720
+        cam_box = c.get("box")
+        cam_crop = c.get("cam")
+        if not cam_box or not cam_crop:
+            corner = clip.get("cam_corner") or "tr"
+            if corner == "tl":
+                cam_box = [0, 0, int(w * 0.35), int(h * 0.45)]
+            elif corner == "bl":
+                cam_box = [0, int(h * 0.55), int(w * 0.35), int(h * 0.45)]
+            elif corner == "br":
+                cam_box = [int(w * 0.65), int(h * 0.55), int(w * 0.35), int(h * 0.45)]
+            elif corner == "tc":
+                cam_box = [int(w * 0.325), 0, int(w * 0.35), int(h * 0.45)]
+            elif corner == "center":
+                cam_box = [int(w * 0.25), int(h * 0.15), int(w * 0.5), int(h * 0.6)]
+            else:
+                cam_box = [int(w * 0.65), 0, int(w * 0.35), int(h * 0.45)]
+            cam_crop = faces.fit_panel(cam_box[0], cam_box[1], cam_box[2], cam_box[3],
+                                       cam_box[0] + cam_box[2] / 2, cam_box[1] + cam_box[3] / 2)
+        split_ratio = float(clip.get("split_ratio") or 0.5)
+        return {"stack": True, "pip": clip["layout"] == "pip" or str(clip.get("cam_pos", "")).startswith("pip"),
+                "size": faces.PIP_SIZE, "ptop": faces.PIP_TOP,
+                "kind": c.get("kind") or "facecam", "cam": cam_crop, "box": cam_box, "w": w, "h": h,
+                "top": split_ratio, "split_ratio": split_ratio, "found": 1.0, "pts": [], "manual": bool(c.get("manual")),
+                "cam_zoom": float(clip.get("cam_zoom") or 1.0),
+                "cam_shape": clip.get("cam_shape") or "rect",
+                "cam_pos": clip.get("cam_pos") or "top",
+                "cam_pos_x": float(clip.get("cam_pos_x") or 0.5),
+                "cam_pos_y": float(clip.get("cam_pos_y") or 0.65),
+                "banner_text": clip.get("banner_text") or "",
+                "banner_style": clip.get("banner_style") or "white_box"}
     t = get_track(None, clip, video)
     room = max(video["w"] - t["cw"], 1)
     return {"found": t["found"], "cw": t["cw"], "w": video["w"], "h": video["h"],
@@ -542,5 +561,6 @@ def render(job, clip_id, p):
                 cam_shape=c.get("cam_shape") or "rect",
                 cam_pos=c.get("cam_pos") or "top",
                 cam_pos_x=float(c.get("cam_pos_x") or 0.5),
-                cam_pos_y=float(c.get("cam_pos_y") or 0.65))
+                cam_pos_y=float(c.get("cam_pos_y") or 0.65),
+                split_ratio=float(c.get("split_ratio") or 0.5))
     db.ex("update clips set render_status='done', render_progress=100, render_path=? where id=?", (out, clip_id))

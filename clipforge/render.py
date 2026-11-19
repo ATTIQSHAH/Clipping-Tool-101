@@ -38,7 +38,7 @@ def _audio_graph(music, music_vol, duck, sfx, first_input):
 def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="follow", crop_x=0.5,
                 encoder="libx264", fps=30, res=1080, music=None, music_vol=0.18, duck=True, sfx=(),
                 track=None, hook_zoom=True, on_progress=None,
-                cam_zoom=1.0, cam_shape="rect", cam_pos="top", cam_pos_x=0.5, cam_pos_y=0.65):
+                cam_zoom=1.0, cam_shape="rect", cam_pos="top", cam_pos_x=0.5, cam_pos_y=0.65, split_ratio=0.5):
     W, H = RES[res]
     w, h = info["w"], info["h"]
     s = max(0.0, float(start))
@@ -104,13 +104,27 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
               f"[v_pip]crop={cw_}:{ch_}:{cx}:{cy}{shape_filter}[pip];"
               f"[bg][game]overlay=0:(H-h)/2[base];"
               f"[base][pip]overlay={ox}:{oy},setsar=1{zoom},ass={ass}[v]")
-    elif layout == "stack" and cam and w / h > 9 / 16 + 0.01:
-        from .faces import TOP_SHARE
-        th = int(H * TOP_SHARE) // 2 * 2
+    elif layout == "stack" and w / h > 9 / 16 + 0.01:
+        top_share = max(0.25, min(float(split_ratio or 0.5), 0.75))
+        th = int(H * top_share) // 2 * 2
         bh = H - th
         gw = min(w, int(h * W / bh)) // 2 * 2
         gx = int((w - gw) * min(max(crop_x, 0), 1)) // 2 * 2
-        cx, cy, cw_, ch_ = cam
+        if not cam:
+            corner = cam_pos or "tr"
+            if corner == "tl":
+                cx, cy, cw_, ch_ = 0, 0, int(w * 0.35), int(h * 0.45)
+            elif corner == "bl":
+                cx, cy, cw_, ch_ = 0, int(h * 0.55), int(w * 0.35), int(h * 0.45)
+            elif corner == "br":
+                cx, cy, cw_, ch_ = int(w * 0.65), int(h * 0.55), int(w * 0.35), int(h * 0.45)
+            elif corner == "tc":
+                cx, cy, cw_, ch_ = int(w * 0.325), 0, int(w * 0.35), int(h * 0.45)
+            else: # "tr" default
+                cx, cy, cw_, ch_ = int(w * 0.65), 0, int(w * 0.35), int(h * 0.45)
+        else:
+            cx, cy, cw_, ch_ = cam
+
         if cam_pos == "bottom":
             # Streamer on bottom, gameplay on top
             fc = (f"[0:v]split[a][b];[b]crop={gw}:{h}:{gx}:0,scale={W}:{bh}:flags=lanczos[top];"
