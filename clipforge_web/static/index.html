@@ -642,7 +642,7 @@ function buildEditor(){
             </div>
             <input id="splitRatio" type="range" min="0.25" max="0.75" step="0.05" value="${c.split_ratio || 0.5}">
             <div class="row muted small"><span>25% Top</span><span style="flex:1;text-align:center">50% Equal Split</span><span>75% Top</span></div>
-            <button id="swapDualScreens" class="ghost fit" style="width:100%;font-size:12px;padding:6px;margin-top:8px">🔄 Swap: ${c.cam_pos==='bottom'?'Gameplay Top / Streamer Bottom':'Streamer Top / Gameplay Bottom'}</button>
+            <button id="swapDualScreens" class="ghost fit" style="width:100%;font-size:12px;padding:6px;margin-top:8px">🔄 Swap: ${['bottom','bl','br','bc'].includes(c.cam_pos)?'Gameplay Top / Streamer Bottom':'Streamer Top / Gameplay Bottom'}</button>
           </div>
 
           <!-- Streamer Camera Source Selection -->
@@ -924,7 +924,7 @@ function buildEditor(){
     
     const vid = S.vid || (S.clip && S.clip.video_id);
     await send('PATCH', '/api/videos/'+vid, {cam_box: box});
-    await save({cam_corner: s, cam_pos: s, cam_crop_x: 0.5, cam_crop_y: 0.5});
+    await save({cam_corner: s, cam_crop_x: 0.5, cam_crop_y: 0.5});
     S.framing = null;
     await loadFraming();
     applyLayout();
@@ -958,7 +958,8 @@ function buildEditor(){
   // Swap Dual-Cam Screen Positions (Top vs Bottom)
   if($('#swapDualScreens')){
     $('#swapDualScreens').onclick=guard(async()=>{
-      const newPos = (S.clip.cam_pos==='bottom')?'top':'bottom';
+      const _isBottom = ['bottom','bl','br','bc'].includes(S.clip.cam_pos);
+      const newPos = _isBottom ? 'top' : 'bottom';
       S.clip.cam_pos = newPos;
       $('#swapDualScreens').textContent = '🔄 Swap: ' + (newPos==='bottom'?'Gameplay Top / Streamer Bottom':'Streamer Top / Gameplay Bottom');
       await save({cam_pos: newPos});
@@ -1092,7 +1093,8 @@ function initCanvasDrag(){
         };
         cv.style.cursor = 'row-resize';
       } else {
-        const isStreamerClick = (c.cam_pos !== 'bottom') ? (my < th) : (my > th);
+        const _btmCorners = new Set(['bottom','bl','br','bc']);
+        const isStreamerClick = !_btmCorners.has(c.cam_pos) ? (my < th) : (my > th);
         if(isStreamerClick){
           // Dragging inside streamer screen (pan streamer)
           S.canvasDrag = {
@@ -1217,7 +1219,8 @@ function initCanvasDrag(){
       if(Math.abs(my - th) <= 14){
         cv.style.cursor = 'row-resize';
       } else {
-        const isStreamerHover = (c.cam_pos !== 'bottom') ? (my < th) : (my > th);
+        const _btmHoverCorners = new Set(['bottom','bl','br','bc']);
+        const isStreamerHover = !_btmHoverCorners.has(c.cam_pos) ? (my < th) : (my > th);
         cv.style.cursor = isStreamerHover ? 'grab' : 'ew-resize';
       }
       return;
@@ -1511,11 +1514,18 @@ function drawStack(v,f,c){
   const cv=$('#stackcv');
   if(!cv||!v.videoWidth||v.readyState<1) return;
   const ph=$('#phone');
-  if(ph){
-    const pw=ph.clientWidth||270, ph_h=ph.clientHeight||480;
-    if(cv.width!==pw||cv.height!==ph_h){cv.width=pw;cv.height=ph_h}
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const pw = (ph && ph.clientWidth) || 270, ph_h = (ph && ph.clientHeight) || 480;
+  if(cv.width !== Math.round(pw * dpr) || cv.height !== Math.round(ph_h * dpr)){
+    cv.width = Math.round(pw * dpr);
+    cv.height = Math.round(ph_h * dpr);
   }
-  const g=cv.getContext('2d'),W=cv.width,H=cv.height;
+  const g=cv.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.scale(dpr, dpr);
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  const W = pw, H = ph_h;
   g.clearRect(0, 0, W, H);
   const vw = v.videoWidth, vh = v.videoHeight;
   const fw = (f && f.w) || vw, fh = (f && f.h) || vh;
@@ -1523,20 +1533,24 @@ function drawStack(v,f,c){
 
   // Determine streamer source bounding box in source video
   let box = null;
-  if(f && f.box) box = f.box;
-  else if(f && f.cam) box = f.cam;
-  else if(S.video && S.video.cam_box){
-    try { box = JSON.parse(S.video.cam_box); } catch(e){}
-  }
-  
-  if(!box){
-    const corner = c.cam_corner || 'tr';
+  const corner = c.cam_corner;
+  if(corner && corner !== 'custom'){
     if(corner === 'tl') box = [0, 0, Math.round(vw * 0.35), Math.round(vh * 0.50)];
     else if(corner === 'bl') box = [0, Math.round(vh * 0.45), Math.round(vw * 0.35), Math.round(vh * 0.55)];
     else if(corner === 'br') box = [Math.round(vw * 0.65), Math.round(vh * 0.45), Math.round(vw * 0.35), Math.round(vh * 0.55)];
     else if(corner === 'tc') box = [Math.round(vw * 0.325), 0, Math.round(vw * 0.35), Math.round(vh * 0.50)];
     else if(corner === 'bc') box = [Math.round(vw * 0.325), Math.round(vh * 0.45), Math.round(vw * 0.35), Math.round(vh * 0.55)];
-    else box = [Math.round(vw * 0.65), 0, Math.round(vw * 0.35), Math.round(vh * 0.50)];
+    else if(corner === 'tr') box = [Math.round(vw * 0.65), 0, Math.round(vw * 0.35), Math.round(vh * 0.50)];
+  }
+  if(!box){
+    if(f && f.box) box = f.box;
+    else if(f && f.cam) box = f.cam;
+    else if(S.video && S.video.cam_box){
+      try { box = JSON.parse(S.video.cam_box); } catch(e){}
+    }
+  }
+  if(!box){
+    box = [0, Math.round(vh * 0.45), Math.round(vw * 0.35), Math.round(vh * 0.55)];
   }
   
   let [cx, cy, cw, ch] = box.map(n => Math.round(n * k));
@@ -1629,7 +1643,9 @@ function drawStack(v,f,c){
 
   // Dual-Cam Stack Mode: Splits into 2 stacked screens
   const topShare = Math.max(0.25, Math.min(0.75, c.split_ratio || 0.5));
-  const isStreamerBottom = c.cam_pos === 'bottom';
+  // cam_pos 'bottom' OR a bottom corner code (bl/br/bc) means streamer is on bottom
+  const _bottomCorners = new Set(['bl','br','bc']);
+  const isStreamerBottom = c.cam_pos === 'bottom' || _bottomCorners.has(c.cam_pos);
   const th = Math.round(H * topShare), bh = H - th;
 
   const streamH = isStreamerBottom ? bh : th;

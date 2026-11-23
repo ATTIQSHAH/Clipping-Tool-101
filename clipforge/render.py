@@ -135,13 +135,12 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         else:
             cx, cy, cw_, ch_ = cam
 
-        cz = max(0.4, min(float(cam_zoom or 1.0), 3.0))
         top_aspect = W / th
         if cw_ / ch_ > top_aspect:
-            sch = int(ch_ / cz) // 2 * 2
+            sch = int(ch_) // 2 * 2
             scw = int(sch * top_aspect) // 2 * 2
         else:
-            scw = int(cw_ / cz) // 2 * 2
+            scw = int(cw_) // 2 * 2
             sch = int(scw / top_aspect) // 2 * 2
         scw = min(w, max(64, scw))
         sch = min(h, max(64, sch))
@@ -151,14 +150,17 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         scx = int(min(max(cx + (cw_ - scw) * px, 0), w - scw)) // 2 * 2
         scy = int(min(max(cy + (ch_ - sch) * py, 0), h - sch)) // 2 * 2
 
-        if cam_pos == "bottom":
+        # Enhance upscaled webcam/streamer crop with unsharp filter for crisp facial detail
+        cam_filter = f"scale={W}:{th}:flags=lanczos,unsharp=5:5:0.7:5:5:0.0"
+
+        if cam_pos in ("bottom", "bl", "br", "bc"):
             # Streamer on bottom, gameplay on top
             fc = (f"[0:v]split[a][b];[b]crop={gw}:{h}:{gx}:0,scale={W}:{bh}:flags=lanczos[top];"
-                  f"[a]crop={scw}:{sch}:{scx}:{scy},scale={W}:{th}:flags=lanczos[bot];"
+                  f"[a]crop={scw}:{sch}:{scx}:{scy},{cam_filter}[bot];"
                   f"[top][bot]vstack,setsar=1{zoom},ass={ass}[v]")
         else:
             # Streamer on top (default), gameplay on bottom
-            fc = (f"[0:v]split[a][b];[a]crop={scw}:{sch}:{scx}:{scy},scale={W}:{th}:flags=lanczos[top];"
+            fc = (f"[0:v]split[a][b];[a]crop={scw}:{sch}:{scx}:{scy},{cam_filter}[top];"
                   f"[b]crop={gw}:{h}:{gx}:0,scale={W}:{bh}:flags=lanczos[bot];"
                   f"[top][bot]vstack,setsar=1{zoom},ass={ass}[v]")
     elif layout in ("blur", "stack", "pip") or w / h <= target_ratio + 0.01:

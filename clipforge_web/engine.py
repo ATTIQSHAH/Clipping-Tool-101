@@ -35,21 +35,32 @@ def ai_key():
 
 
 def clip_source(clip, video):
-    """Live moments are cut into their own small file; everything else comes from the video."""
-    src = clip.get("src") or video.get("path")
+    """Live moments are cut into their own small file; prefer HD clip cut if available, else video file."""
+    src = clip.get("src")
     if src and os.path.exists(src):
         return src
+    vid = video["id"]
+    vd = vdir(vid)
+    cid = clip.get("id")
+    if cid and os.path.isdir(vd):
+        for f in os.listdir(vd):
+            if f.startswith(f"hd_{cid}_") and f.endswith(".mp4"):
+                hd_path = os.path.join(vd, f)
+                if os.path.exists(hd_path) and os.path.getsize(hd_path) > 1000:
+                    return hd_path
+    vpath = video.get("path")
+    if vpath and os.path.exists(vpath):
+        return vpath
     if src:
         base = os.path.basename(src)
-        cand = os.path.join(vdir(video["id"]), base)
+        cand = os.path.join(vd, base)
         if os.path.exists(cand):
             return cand
-    vd = vdir(video["id"])
     if os.path.isdir(vd):
         for f in os.listdir(vd):
             if f.endswith((".mp4", ".mkv", ".webm")) and not f.endswith(".info.json"):
                 return os.path.join(vd, f)
-    return src
+    return vpath or src
 
 
 # ---------------- import ----------------
@@ -319,12 +330,17 @@ def analyze_video(job, video_id, p):
 
 # ---------------- captions for a clip ----------------
 def ensure_clip_words(clip, video=None):
-    """Ensure the clip has valid words. If words are missing, transcribe the clip audio on the fly."""
+    """Ensure the clip has valid words with good coverage. If words are missing or cover
+    less than 15% of the clip duration, transcribe the clip audio on the fly."""
     raw = clip.get("words")
     words = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    clip_dur = max(1.0, clip["end"] - clip["start"])
     matching = [w for w in words if w["start"] >= clip["start"] - 0.05 and w["end"] <= clip["end"] + 0.05]
+    # Check coverage: words should span at least 15% of clip duration
     if matching:
-        return words
+        covered = max(0.0, matching[-1]["end"] - matching[0]["start"])
+        if covered >= clip_dur * 0.15:
+            return words  # good enough coverage, return existing words
 
     vid_id = clip["video_id"]
     if not video:
@@ -460,8 +476,10 @@ def get_track(job, clip, video):
         t = json.loads(clip["track"])
         if abs(t["start"] - clip["start"]) < 0.01 and abs(t["end"] - clip["end"]) < 0.01:
             return t
+    aspect = str(clip.get("aspect_ratio") or "9:16").strip()
+    target_ratio = 1.0 if aspect == "1:1" else (16/9 if aspect == "16:9" else 9/16)
     t = faces.track(which("ffmpeg"), clip_source(clip, video), video["w"], video["h"], clip["start"], clip["end"],
-                    fps=5, should_stop=job.check if job else None)
+                    fps=5, should_stop=job.check if job else None, target_ratio=target_ratio)
     t["start"], t["end"] = clip["start"], clip["end"]
     db.ex("update clips set track=? where id=?", (db.dumps(t), clip["id"]))
     return t
@@ -469,16 +487,11 @@ def get_track(job, clip, video):
 
 def get_cam(job, clip, video):
     """Facecam box for the stacked layout (cached until the clip's start or end changes).
-    A box drawn by hand on the video wins over detection for all its clips."""
+    A clip-specific corner or box chosen wins over general video detection."""
     w, h = video.get("w") or 1280, video.get("h") or 720
-    if video.get("cam_box"):
-        try:
-            x, y, bw, bh = json.loads(video["cam_box"])
-            return {"cam": faces.fit_panel(x, y, bw, bh, x + bw / 2, y + bh / 2), "box": [x, y, bw, bh], "kind": "facecam",
-                    "exact": True, "manual": True}
-        except Exception:
-            pass
+    split_r = float(clip.get("split_ratio") or 0.5)
 
+    # 1. Corner preset selected on clip
     corner = clip.get("cam_corner")
     if corner and corner in ("tl", "tr", "bl", "br", "tc", "bc"):
         if corner == "tl":
@@ -493,8 +506,17 @@ def get_cam(job, clip, video):
             box = [int(w * 0.325), int(h * 0.45), int(w * 0.35), int(h * 0.55)]
         else: # tr
             box = [int(w * 0.65), 0, int(w * 0.35), int(h * 0.50)]
-        return {"cam": faces.fit_panel(box[0], box[1], box[2], box[3], box[0] + box[2] / 2, box[1] + box[3] / 2),
+        return {"cam": faces.fit_panel(box[0], box[1], box[2], box[3], box[0] + box[2] / 2, box[1] + box[3] / 2, top_share=split_r),
                 "box": box, "kind": "facecam", "exact": True, "manual": True}
+
+    # 2. Hand-drawn box on video
+    if video.get("cam_box"):
+        try:
+            x, y, bw, bh = json.loads(video["cam_box"])
+            return {"cam": faces.fit_panel(x, y, bw, bh, x + bw / 2, y + bh / 2, top_share=split_r), "box": [x, y, bw, bh], "kind": "facecam",
+                    "exact": True, "manual": True}
+        except Exception:
+            pass
 
     if clip.get("cam"):
         try:
@@ -516,7 +538,7 @@ def get_cam(job, clip, video):
             pass
     if job:
         job.check()
-    c = faces.find_facecam(which("ffmpeg"), clip_source(clip, video), video["w"], video["h"], clip["start"], clip["end"])
+    c = faces.find_facecam(which("ffmpeg"), clip_source(clip, video), video["w"], video["h"], clip["start"], clip["end"], top_share=split_r)
     c["start"], c["end"] = clip["start"], clip["end"]
     db.ex("update clips set cam=? where id=?", (db.dumps(c), clip["id"]))
     if not video.get("cam_box") and c.get("kind") == "facecam" and c.get("box") and c.get("exact"):

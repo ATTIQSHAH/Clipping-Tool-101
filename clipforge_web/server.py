@@ -423,6 +423,16 @@ def patch_clip(cid: int, body: dict = Body(...)):
 
 
 @app.get("/api/clips/{cid}/source")
+def clip_source_video(cid: int):
+    c = _clip(cid)
+    p = c["src"] if (c.get("src") and os.path.exists(c["src"])) else None
+    if not p:
+        p = engine.clip_source(c, _video(c["video_id"]))
+    if not p or not os.path.exists(p):
+        raise HTTPException(404, "No video file.")
+    return FileResponse(p, media_type="video/mp4" if p.endswith(".mp4") else "video/webm")
+
+
 @app.get("/api/clips/{cid}/video")
 def clip_video(cid: int):
     c = _clip(cid)
