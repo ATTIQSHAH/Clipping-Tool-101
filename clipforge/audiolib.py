@@ -49,6 +49,30 @@ _STARTER = {
 }
 
 
+def _e(expr):  # lavfi needs commas inside an expression escaped
+    return expr.replace(",", "\\,")
+
+
+# Meme-style sounds, also synthesized (no samples copied from anywhere).
+_STARTER.update({
+    "airhorn.wav": ["-f", "lavfi", "-i", "aevalsrc=" + _e(
+        "0.3*(sgn(sin(2*PI*466*t))+0.7*sgn(sin(2*PI*587*t))+0.5*sgn(sin(2*PI*698*t)))"
+        "*(between(t,0,0.16)+between(t,0.22,0.38)+between(t,0.44,1.3))") + ":d=1.35:s=44100",
+                    "-af", "lowpass=f=3500,afade=t=out:st=1.15:d=0.2"],
+    "sad_trombone.wav": ["-f", "lavfi", "-i", "aevalsrc=" + _e(
+        "0.5*(sin(2*PI*F*t)+0.5*sin(4*PI*F*t)+0.3*sin(6*PI*F*t))*if(lt(t,1.35),sin(PI*mod(t,0.45)/0.45),exp(-1.6*(t-1.35)))"
+        .replace("F", "if(lt(t,0.45),293.7,if(lt(t,0.9),277.2,if(lt(t,1.35),261.6,246.9*(1+0.015*sin(2*PI*6*t)))))"))
+        + ":d=2.6:s=44100", "-af", "lowpass=f=2500"],
+    "record_scratch.wav": ["-f", "lavfi", "-i", "aevalsrc=" + _e(
+        "0.9*sin(91173*t*t+3000*t)*abs(sin(2*PI*(9*t-12*t*t)))*exp(-3*t)") + ":d=0.5:s=44100", "-af", "highpass=f=400,lowpass=f=4000"],
+    "vine_boom.wav": ["-f", "lavfi", "-i", "aevalsrc=" + _e(
+        "0.9*sin(2*PI*58*t)*exp(-2.2*t)+0.5*sin(2*PI*(130-50*t)*t)*exp(-5*t)") + ":d=1.6:s=44100",
+                      "-af", "aecho=0.8:0.6:70|140:0.35|0.2"],
+})
+MEME_FAIL = "sad_trombone.wav"
+MEME_WIN = "airhorn.wav"
+
+
 def make_starter_sfx(ffmpeg):
     made = []
     for name, args in _STARTER.items():
