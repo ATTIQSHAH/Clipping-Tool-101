@@ -474,4 +474,49 @@ def render(job, clip_id, p):
     render_clip(job, ffmpeg, src, info, start, end, ass, out, layout, c["crop_x"],
                 res=c["res"], music=music, music_vol=0.18, duck=True, sfx=sfx, track=track,
                 on_progress=lambda f: setp(0.12 + 0.88 * f))
-    db.ex("update clips set render_status='done', render_progress=100, render_path=? where id=?", (out, clip_id))
+    db.ex("update clips set render_status='done', render_progress=100, render_path=?, qc=? where id=?",
+          (out, db.dumps(quality_check(ffmpeg, out, clip_words(c))), clip_id))
+
+
+# ---------------- quality check, post text ----------------
+def quality_check(ffmpeg, path, words):
+    """Problems a viewer would notice: [{"level": "fail"|"warn", "msg": ...}]. Empty list = looks fine."""
+    r = subprocess.run([ffmpeg, "-v", "info", "-i", path, "-vf", "blackdetect=d=1:pix_th=0.08", "-af", "volumedetect",
+                        "-f", "null", "-"], capture_output=True, text=True)
+    log = r.stderr
+    return qc_from_log(log, probe(which("ffprobe"), path)["duration"], words)
+
+
+def qc_from_log(log, dur, words):
+    out = []
+    if dur < 6:
+        out.append({"level": "fail", "msg": f"Only {dur:.0f} seconds long. Shorts under 6 s rarely get views."})
+    m = re.search(r"mean_volume: (-?[\d.]+) dB", log)
+    if m and float(m.group(1)) < -45:
+        out.append({"level": "fail", "msg": "The sound is almost silent."})
+    black = sum(float(x) for x in re.findall(r"black_duration:([\d.]+)", log))
+    if black > max(1.5, dur * 0.25):
+        out.append({"level": "warn", "msg": f"{black:.0f} s of black screen."})
+    if not words:
+        out.append({"level": "warn", "msg": "Nobody speaks in this clip, so there are no captions."})
+    elif len(words) / max(dur, 1) < 0.5:
+        out.append({"level": "warn", "msg": "Very little speech: check it still makes sense without sound."})
+    return out
+
+
+def post_text(c, v):
+    """Ready-to-paste post: title, credit to the streamer and hashtags."""
+    info = {}
+    if v.get("info_path") and os.path.exists(v["info_path"]):
+        with open(v["info_path"], encoding="utf-8") as f:
+            info = json.load(f)
+    src = v.get("source") or ""
+    plat = next((n for k, n in (("twitch.tv", "Twitch"), ("kick.com", "Kick"), ("youtu", "YouTube")) if k in src), "")
+    who = info.get("channel") or info.get("uploader")
+    m = re.search(r"(?:twitch\.tv|kick\.com)/([A-Za-z0-9_]+)|youtube\.com/@([\w.-]+)", src)
+    if not who and m and (m.group(1) or "").lower() != "videos":
+        who = m.group(1) or m.group(2)
+    tag = re.sub(r"[^A-Za-z0-9]", "", who or "")
+    tags = ["#GTA6", "#GTA", "#Shorts"] + ([f"#{tag}"] if tag else []) + ([f"#{plat}"] if plat else [])
+    return "\n\n".join(x for x in (c["title"], f"Credit: {who}" + (f" on {plat}" if plat else "") if who else "",
+                                    " ".join(tags)) if x)
