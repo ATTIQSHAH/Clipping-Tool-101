@@ -285,7 +285,8 @@ function drawMap(){
 }
 function scoreCol(s){return s>=.6?'var(--good)':s>=.35?'var(--mid)':'var(--low)'}
 function bar(label,val){return val==null?'':`<div>${label} ${Math.round(val*100)}<div class="bar"><i style="width:${Math.round(val*100)}%"></i></div></div>`}
-function stateBadge(k){
+function stateBadge(k){return (k.qc&&k.qc.some(x=>x.level==='fail')?'<span class="pill err">Check quality</span> ':'')+stateBadge0(k)}
+function stateBadge0(k){
   if(k.render_status==='running'||k.render_status==='queued')return `<span class="pill busy">${k.render_status==='queued'?'Waiting':'Preparing '+Math.round(k.render_progress)+'%'}</span>`;
   if(k.render_status==='failed')return '<span class="pill err">Failed</span>';
   if(k.status==='approved'&&k.rendered&&k.downloaded)return '<span class="pill ok">Saved to Downloads ✓</span>';
@@ -405,6 +406,9 @@ function buildEditor(){
      <div><label for="en">End (s)</label><input id="en" type="number" step="0.1" value="${c.end.toFixed(1)}"><div class="nudge"><button data-n="en:-.5">−.5</button><button data-n="en:.5">+.5</button><button data-n="en:1">+1</button><button id="enNow">Playhead</button></div></div></div>
    <p class="muted small" id="dur" style="margin:0"></p>
    <div><label>Why this clip</label><ul class="why">${(c.reasons||[]).map(r=>`<li>${esc(r)}</li>`).join('')}</ul></div>
+   <div id="qcbox"></div>
+   <div><label for="post">Post text</label><textarea id="post" rows="5" placeholder="Loading…"></textarea>
+     <div class="row" style="margin-top:6px"><button id="postCopy" class="fit">Copy post text</button><button id="cover" class="fit" hidden>Download cover picture</button></div></div>
    <hr><h2>Captions</h2><p class="muted small" style="margin:2px 0 0">Fix any word. Timing stays with the words you keep.</p><div id="cues"></div>
   </div><div class="edfoot"><button id="reject" class="ghost">Reject</button><button id="approve" class="primary"><i class="fill"></i><span></span></button></div></div>`;
   $('#tpls').innerHTML=Object.entries(S.tpl).map(([n,t])=>`<button class="style ${n===c.template?'on':''}" data-t="${n}"><span class="s" style="color:${t.active};text-shadow:${t.box?'none':tplShadow(t,.08)};${t.box?'background:#000b;border-radius:4px;padding:0 4px':''}">${t.upper?'WORD':'Word'}</span><small>${n.replace(/_/g,' ')}</small></button>`).join('');
@@ -416,6 +420,9 @@ function buildEditor(){
   sizePhone();markSeg();drawCues();updateApproveUI();updDur();drawTrim();trimEvents();
   $('#close').onclick=()=>{S.cid=null;S.clip=null;showEditor(false);drawCands();drawMap()};
   $('#play').onclick=playClip;$('#snd').onchange=e=>v.muted=!e.target.checked;
+  api('/api/clips/'+c.id+'/post').then(r=>{if(S.cid===c.id)$('#post').value=r.text}).catch(()=>{});
+  $('#postCopy').onclick=guard(async()=>{const t=$('#post');try{await navigator.clipboard.writeText(t.value)}catch{t.select();document.execCommand('copy')}toast('Post text copied.')});
+  $('#cover').onclick=()=>{const a=document.createElement('a');a.href='/api/clips/'+S.cid+'/cover';a.download='';document.body.appendChild(a);a.click();a.remove()};
   $('#approve').onclick=guard(()=>approve(S.cid));
   $('#reject').onclick=guard(()=>save({status:'rejected'}).then(()=>toast('Rejected.')));
   $('#title').onchange=guard(e=>save({title:e.target.value}));
@@ -534,6 +541,9 @@ function updateApproveUI(){
   else if(c.status==='approved'&&c.rendered&&rs==='done')txt=c.downloaded?'Saved ✓  Download again':'Download';
   else txt='Approve and download';
   if(lab.dataset.t!==txt){lab.dataset.t=txt;lab.innerHTML=txt.includes('✓')?txt.replace('✓','<b class="check">✓</b>'):esc(txt)}
+  const q=$('#qcbox'),qk=JSON.stringify(c.qc);
+  if(q&&q.dataset.k!==qk){q.dataset.k=qk;q.innerHTML=c.qc==null?'':'<label>Quality check</label>'+(c.qc.length?`<ul class="why">${c.qc.map(x=>`<li style="color:var(--${x.level==='fail'?'low':'mid'})">${x.level==='fail'?'Problem':'Check'}: ${esc(x.msg)}</li>`).join('')}</ul>`:'<p class="small" style="color:var(--good);margin:0">Looks good ✓</p>')}
+  const cv=$('#cover');if(cv)cv.hidden=!(c.rendered&&rs==='done');
   const err=$('#rerr');if(rs==='failed'&&!err){const e=document.createElement('p');e.id='rerr';e.className='small';e.style.cssText='color:var(--low);margin:0';e.textContent=c.render_error||'The clip could not be made.';$('#editor .edbody').appendChild(e)}
   else if(rs!=='failed'&&err)err.remove();
 }

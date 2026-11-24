@@ -396,6 +396,7 @@ def _clip_out(c):
     o["reasons"] = json.loads(c["reasons"] or "[]")
     o["sfx"] = json.loads(c["sfx"] or "[]")
     o["rendered"] = bool(c["render_path"] and os.path.exists(c["render_path"]))
+    o["qc"] = json.loads(c["qc"]) if c.get("qc") else None
     if c["render_status"] == "failed":
         j = db.q("select error from jobs where type='render' and ref_id=? and status='failed' order by id desc limit 1",
                  (c["id"],), one=True)
@@ -584,6 +585,28 @@ def download(cid: int):
     v = _video(c["video_id"])
     return FileResponse(c["render_path"], media_type="video/mp4",
                         filename=f"ClipForge_{_slug(v['title'])[:30]}_{_slug(c['title'])}.mp4")
+
+
+@app.get("/api/clips/{cid}/post")
+def post_text(cid: int):
+    c = _clip(cid)
+    return {"text": engine.post_text(c, _video(c["video_id"]))}
+
+
+@app.get("/api/clips/{cid}/cover")
+def cover(cid: int):
+    """A full-size picture of the finished clip at its big moment, for the video's cover."""
+    c = _clip(cid)
+    if not (c["render_path"] and os.path.exists(c["render_path"])):
+        raise HTTPException(404, "Make the clip first, then the cover comes from it.")
+    t = min(max(c["peak"] - c["start"], 0.5), c["end"] - c["start"] - 0.2) if c["peak"] else 1.0
+    out = os.path.splitext(c["render_path"])[0] + f"_cover_{t:.1f}.jpg"
+    if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(c["render_path"]):
+        subprocess.run([which("ffmpeg"), "-v", "error", "-y", "-ss", f"{t:.2f}", "-i", c["render_path"], "-frames:v", "1",
+                        "-q:v", "2", out], capture_output=True, timeout=60)
+    if not os.path.exists(out):
+        raise HTTPException(500, "Couldn't make the cover picture.")
+    return FileResponse(out, media_type="image/jpeg", filename=f"ClipForge_{_slug(c['title'])}_cover.jpg")
 
 
 # ---------------- live ----------------
