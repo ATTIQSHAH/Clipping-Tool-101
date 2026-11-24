@@ -67,7 +67,31 @@ TEMPLATES = {
                      shadow=3, box=False, upper=True, pop=True, mode="word", mv=650, scale_active=0, glow=0),
     "minimal": dict(font="Arial", size=62, bold=0, primary="#FFFFFF", active="#FFFFFF", outline="#000000", ow=4,
                     shadow=1, box=False, upper=False, pop=False, mode="phrase", mv=300, scale_active=0, glow=0),
+    "impact_fire": dict(font="Impact", size=90, bold=1, primary="#FFFFFF", active="#FF4500", outline="#000000", ow=8,
+                        shadow=3, box=False, upper=True, pop=True, mode="phrase", mv=480, scale_active=115, glow=0),
+    "montserrat_cyan": dict(font="Montserrat", size=84, bold=1, primary="#FFFFFF", active="#00F2FE", outline="#000000", ow=6,
+                            shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=470, scale_active=0, glow=0),
+    "comic_pop": dict(font="Comic Sans MS", size=84, bold=1, primary="#FFFFFF", active="#FFD700", outline="#000000", ow=7,
+                      shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=470, scale_active=0, glow=0),
 }
+
+
+def to_srt(cues):
+    """Generate standard SubRip (.srt) subtitle string from cues."""
+    def _ts_srt(t):
+        t = max(0.0, float(t))
+        ms = int(round((t - int(t)) * 1000))
+        s = int(t)
+        h = s // 3600
+        m = (s % 3600) // 60
+        sec = s % 60
+        return f"{h:02d}:{m:02d}:{sec:02d},{ms:03d}"
+
+    out = []
+    for i, q in enumerate(cues, 1):
+        txt = q.get("text") or " ".join(w.get("w", "") for w in q.get("words", []))
+        out.append(f"{i}\n{_ts_srt(q['start'])} --> {_ts_srt(q['end'])}\n{txt.strip()}\n")
+    return "\n".join(out)
 
 
 def build_cues(words, max_words=3, max_chars=22, gap=0.35):
@@ -106,7 +130,8 @@ def _esc(s):
 
 
 def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, emojis=True, hook_boost=True,
-           banner_text="", banner_style="white_box", banner_x=0.5, banner_y=0.12):
+           banner_text="", banner_style="white_box", banner_x=0.5, banner_y=0.12,
+           banner_size=1.0, banner_font="Arial"):
     t = TEMPLATES.get(template) or TEMPLATES["yellow_pop"]
     style_box = 3 if t["box"] else 1
     back = _bgr("#000000", 90 if t["box"] else 128)
@@ -118,16 +143,23 @@ def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, e
     mv = max(28, int(round(t["mv"] * scale)))
     ow = max(2, int(round(t["ow"] * scale)))
     sh = max(1, int(round(t["shadow"] * scale)))
-    bsize = max(22, int(round(52 * scale)))
+    bfont = banner_font if banner_font else "Arial"
+    bsize = max(18, int(round(52 * float(banner_size or 1.0) * scale)))
     bmv = max(20, int(round(110 * scale)))
     
     # Banner styles for top hook headline
     if banner_style == "dark_box":
-        banner_def = f"Style: Banner,Arial,{bsize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,16,6,8,80,80,{bmv},1\n"
+        banner_def = f"Style: Banner,{bfont},{bsize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,16,6,8,80,80,{bmv},1\n"
     elif banner_style == "neon":
-        banner_def = f"Style: Banner,Arial,{bsize+2},&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,10,8,80,80,{bmv},1\n"
+        banner_def = f"Style: Banner,{bfont},{bsize+2},&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,10,8,80,80,{bmv},1\n"
+    elif banner_style in ("clean_text", "no_box"):
+        # Without background box: pure white text with crisp dark outline and shadow
+        banner_def = f"Style: Banner,{bfont},{bsize+4},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,7,4,8,80,80,{bmv},1\n"
+    elif banner_style == "yellow_text":
+        # Without background box: pure yellow text with crisp dark outline and shadow
+        banner_def = f"Style: Banner,{bfont},{bsize+4},&H0000E5FF,&H0000E5FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,7,4,8,80,80,{bmv},1\n"
     else:  # white_box (standard TikTok / Instagram card)
-        banner_def = f"Style: Banner,Arial,{bsize},&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,16,6,8,80,80,{bmv},1\n"
+        banner_def = f"Style: Banner,{bfont},{bsize},&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,16,6,8,80,80,{bmv},1\n"
 
     head = (
         "[Script Info]\nScriptType: v4.00+\nWrapStyle: 0\nScaledBorderAndShadow: yes\n"

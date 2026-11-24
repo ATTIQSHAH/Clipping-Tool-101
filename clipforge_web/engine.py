@@ -332,46 +332,51 @@ def analyze_video(job, video_id, p):
 
 # ---------------- captions for a clip ----------------
 def ensure_clip_words(clip, video=None):
-    """Ensure the clip has valid words with good coverage. If words are missing or cover
-    less than 15% of the clip duration, transcribe the clip audio on the fly."""
+    """Ensure the clip has valid words with good coverage. Checks full video json cache first,
+    then falls back to on-the-fly Whisper transcription of the clip audio."""
     if not clip or not isinstance(clip, dict):
         return []
-    raw = clip.get("words")
-    words = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    s = clip.get("start", 0.0)
-    e = clip.get("end", s + 1.0)
-    clip_dur = max(1.0, e - s)
-    matching = [w for w in words if w.get("start", 0) >= s - 0.05 and w.get("end", 0) <= e + 0.05]
-    # Check coverage: words should span at least 15% of clip duration
-    if matching:
-        covered = max(0.0, matching[-1].get("end", 0) - matching[0].get("start", 0))
-        if covered >= clip_dur * 0.15:
-            return words  # good enough coverage, return existing words
+    s = float(clip.get("start", 0.0) or 0.0)
+    e = float(clip.get("end", s + 1.0) or (s + 1.0))
+    dur = max(0.5, e - s)
+    cid = clip.get("id")
 
     vid_id = clip.get("video_id") or (video.get("id") if isinstance(video, dict) else None)
-    if not vid_id:
-        return words or matching
-    if not video:
+    if not video and vid_id:
         video = db.q("select * from videos where id=?", (vid_id,), one=True)
     if not video:
-        return words or matching
+        raw = clip.get("words")
+        return json.loads(raw) if isinstance(raw, str) else (raw or [])
 
-    cid = clip.get("id")
-    if not cid:
-        return words or matching
+    work = wdir(vid_id)
 
+    # 1. First, check if full video transcription cache exists in work/
+    if os.path.isdir(work):
+        for fn in os.listdir(work):
+            if fn.startswith("full_") and fn.endswith(".json"):
+                try:
+                    full_words = load_json(os.path.join(work, fn))
+                    filtered = [w for w in full_words if float(w.get("end", 0)) >= s - 0.2 and float(w.get("start", 0)) <= e + 0.2]
+                    if filtered:
+                        if cid:
+                            db.ex("update clips set words=? where id=?", (db.dumps(filtered), cid))
+                        clip["words"] = filtered
+                        return filtered
+                except Exception:
+                    pass
+
+    # 2. Extract audio and transcribe with Whisper
     src = clip_source(clip, video)
     if not src or not os.path.exists(src):
-        return words or matching
+        raw = clip.get("words")
+        return json.loads(raw) if isinstance(raw, str) else (raw or [])
 
     try:
         ffmpeg = which("ffmpeg")
-        work = wdir(vid_id)
-        start, dur = s, max(0.5, e - s)
-        clip_wav = os.path.join(work, f"clip_{cid}_speech.wav")
+        clip_wav = os.path.join(work, f"clip_{cid or 'tmp'}_speech.wav")
         vpath = video.get("path") if isinstance(video, dict) else None
         is_full = bool(vpath and os.path.exists(vpath) and os.path.abspath(src) == os.path.abspath(vpath))
-        ss_val = start if is_full else 0.0
+        ss_val = s if is_full else 0.0
         cmd = [ffmpeg, "-y", "-ss", f"{ss_val:.3f}", "-t", f"{dur:.3f}", "-i", src,
                "-vn", "-ac", "1", "-ar", "16000", clip_wav]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
@@ -380,33 +385,66 @@ def ensure_clip_words(clip, video=None):
         if tr_words:
             new_words = []
             for w in tr_words:
-                new_words.append({"w": w["w"], "start": round(start + w["start"], 3), "end": round(start + w["end"], 3)})
-            db.ex("update clips set words=? where id=?", (db.dumps(new_words), cid))
+                st = round(s + w["start"], 3) if is_full else round(w["start"], 3)
+                en = round(s + w["end"], 3) if is_full else round(w["end"], 3)
+                new_words.append({"w": w["w"], "start": st, "end": en})
+            if cid:
+                db.ex("update clips set words=? where id=?", (db.dumps(new_words), cid))
             clip["words"] = new_words
             return new_words
     except Exception:
         pass
-    return words or matching
+
+    raw = clip.get("words")
+    return json.loads(raw) if isinstance(raw, str) else (raw or [])
 
 
 def clip_words(clip):
-    """Words inside the clip on the clip timeline, each remembering its index in the stored word list."""
+    """Words inside the clip on the clip timeline, each remembering its index in the stored word list.
+    Handles both absolute video timeline timestamps and 0-relative clip timestamps seamlessly."""
     if not clip or not isinstance(clip, dict):
         return []
-    s = clip.get("start", 0.0)
-    e = clip.get("end", s + 1.0)
+    s = float(clip.get("start", 0.0) or 0.0)
+    e = float(clip.get("end", s + 1.0) or (s + 1.0))
+    dur = max(0.5, e - s)
     raw = clip.get("words")
     words = json.loads(raw) if isinstance(raw, str) else (raw or [])
-    res = [{"w": w["w"], "start": w.get("start", 0) - s, "end": w.get("end", 0) - s, "i": i}
-           for i, w in enumerate(words)
-           if w.get("start", 0) >= s - 0.05 and w.get("end", 0) <= e + 0.05]
-    if not res:
+
+    # 1. Try matching words on the absolute timeline
+    matching = [
+        {"w": w["w"], "start": round(max(0.0, float(w.get("start", 0)) - s), 3),
+         "end": round(min(dur, float(w.get("end", 0)) - s), 3), "i": i}
+        for i, w in enumerate(words)
+        if float(w.get("end", 0)) >= s - 0.2 and float(w.get("start", 0)) <= e + 0.2
+    ]
+
+    # 2. If no absolute match, check if words are already 0-relative (e.g. from cut clip/live moment)
+    if not matching and words:
+        matching = [
+            {"w": w["w"], "start": round(max(0.0, float(w.get("start", 0))), 3),
+             "end": round(min(dur, float(w.get("end", 0))), 3), "i": i}
+            for i, w in enumerate(words)
+            if float(w.get("end", 0)) >= 0.0 and float(w.get("start", 0)) <= dur + 0.5
+        ]
+
+    # 3. If still no words or coverage is too poor (<15%), ensure words via transcription or full json
+    if not matching or (matching[-1]["end"] - matching[0]["start"] < dur * 0.15):
         new_words = ensure_clip_words(clip)
         if new_words:
-            res = [{"w": w["w"], "start": w.get("start", 0) - s, "end": w.get("end", 0) - s, "i": i}
-                   for i, w in enumerate(new_words)
-                   if w.get("start", 0) >= s - 0.05 and w.get("end", 0) <= e + 0.05]
-    return res
+            matching = [
+                {"w": w["w"], "start": round(max(0.0, float(w.get("start", 0)) - s), 3),
+                 "end": round(min(dur, float(w.get("end", 0)) - s), 3), "i": i}
+                for i, w in enumerate(new_words)
+                if float(w.get("end", 0)) >= s - 0.2 and float(w.get("start", 0)) <= e + 0.2
+            ]
+            if not matching:
+                matching = [
+                    {"w": w["w"], "start": round(max(0.0, float(w.get("start", 0))), 3),
+                     "end": round(min(dur, float(w.get("end", 0))), 3), "i": i}
+                    for i, w in enumerate(new_words)
+                    if float(w.get("end", 0)) >= 0.0 and float(w.get("start", 0)) <= dur + 0.5
+                ]
+    return matching
 
 
 def auto_sfx(clip):
@@ -674,6 +712,8 @@ def render(job, clip_id, p):
     banner_style = c.get("banner_style") or "white_box"
     banner_x = float(c.get("banner_x") if c.get("banner_x") is not None else 0.5)
     banner_y = float(c.get("banner_y") if c.get("banner_y") is not None else 0.12)
+    banner_size = float(c.get("banner_size") if c.get("banner_size") is not None else 1.0)
+    banner_font = str(c.get("banner_font") or "Arial")
 
     res_base = int(c["res"] or 1080)
     aspect = str(c.get("aspect_ratio") or "9:16").strip()
@@ -688,7 +728,8 @@ def render(job, clip_id, p):
 
     with open(ass, "w", encoding="utf-8") as f:
         f.write(captions.to_ass(cues, c["template"], width=W, height=H, censor=censor, emojis=emojis, hook_boost=True,
-                                banner_text=banner_text, banner_style=banner_style, banner_x=banner_x, banner_y=banner_y))
+                                banner_text=banner_text, banner_style=banner_style, banner_x=banner_x, banner_y=banner_y,
+                                banner_size=banner_size, banner_font=banner_font))
     out_dir = os.path.join(db.DATA, "exports")
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"clip_{clip_id}.mp4")

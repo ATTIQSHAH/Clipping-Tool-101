@@ -479,6 +479,38 @@ body.studio-open {
   border: 1.5px solid #38bdf8;
   box-shadow: 0 0 16px rgba(56,189,248,0.4);
 }
+.bannerBox .card_clean {
+  background: transparent !important;
+  color: #ffffff;
+  font-weight: 900;
+  font-size: 14px;
+  line-height: 1.25;
+  padding: 4px 6px;
+  border-radius: 0;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border: none !important;
+  box-shadow: none !important;
+  text-shadow: 0 2px 4px #000, 0 0 10px #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000;
+  -webkit-text-stroke: 1.2px #000;
+}
+.bannerBox .card_yellow {
+  background: transparent !important;
+  color: #facc15;
+  font-weight: 900;
+  font-size: 14px;
+  line-height: 1.25;
+  padding: 4px 6px;
+  border-radius: 0;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border: none !important;
+  box-shadow: none !important;
+  text-shadow: 0 2px 4px #000, 0 0 10px #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000;
+  -webkit-text-stroke: 1.2px #000;
+}
 
 /* Monitor Transport Bar */
 .studio-transport {

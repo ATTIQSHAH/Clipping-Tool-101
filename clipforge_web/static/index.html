@@ -771,6 +771,32 @@ function buildEditor(){
             </div>
           </div>
 
+          <!-- Text Size Scaling -->
+          <div style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0;font-weight:700">Text Size: <b id="bannerSizeVal" style="color:var(--accent)">${Math.round((c.banner_size || 1.0) * 100)}%</b></label>
+              <div class="row fit" style="gap:4px">
+                <button id="bannerSizeDown" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Make text smaller">🔍−</button>
+                <button id="bannerSizeReset" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Reset text size">1.0x</button>
+                <button id="bannerSizeUp" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Make text bigger">🔍+</button>
+              </div>
+            </div>
+            <input id="bannerSize" type="range" min="0.5" max="2.2" step="0.05" value="${c.banner_size || 1.0}">
+            <div class="row muted small"><span>0.5x Small</span><span style="flex:1;text-align:center">1.0x Normal</span><span>2.2x Huge</span></div>
+          </div>
+
+          <!-- Font Design -->
+          <div>
+            <label>Font Design</label>
+            <div class="seg" id="bannerFont">
+              <button data-bf="Impact" class="${(c.banner_font||'Impact')==='Impact'?'on':''}" style="font-family:Impact,sans-serif">IMPACT</button>
+              <button data-bf="Montserrat" class="${c.banner_font==='Montserrat'?'on':''}" style="font-family:Montserrat,sans-serif;font-weight:800">Montserrat</button>
+              <button data-bf="Arial Black" class="${c.banner_font==='Arial Black'?'on':''}" style="font-family:'Arial Black',sans-serif">Arial Black</button>
+              <button data-bf="Poppins" class="${c.banner_font==='Poppins'?'on':''}" style="font-family:Poppins,sans-serif;font-weight:800">Poppins</button>
+              <button data-bf="Comic Sans MS" class="${c.banner_font==='Comic Sans MS'?'on':''}" style="font-family:'Comic Sans MS',sans-serif">Comic</button>
+            </div>
+          </div>
+
           <div>
             <label>Title Card Position (Drag on screen or pick preset)</label>
             <div class="preset-chips" id="bannerPosChips">
@@ -782,12 +808,14 @@ function buildEditor(){
           </div>
 
           <div>
-            <label>Banner Card Style</label>
+            <label>Text Background Style</label>
             <div class="seg" id="bannerStyle">
-              <button data-bs="white_box">📄 White Card</button>
-              <button data-bs="dark_box">⬛ Dark Box</button>
-              <button data-bs="neon">⚡ Neon</button>
-              <button data-bs="none">🚫 Hidden</button>
+              <button data-bs="clean_text" class="${c.banner_style==='clean_text'?'on':''}">✨ No Box (Transparent)</button>
+              <button data-bs="yellow_text" class="${c.banner_style==='yellow_text'?'on':''}">💛 Yellow (No Box)</button>
+              <button data-bs="white_box" class="${(c.banner_style||'white_box')==='white_box'?'on':''}">📄 White Card</button>
+              <button data-bs="dark_box" class="${c.banner_style==='dark_box'?'on':''}">⬛ Dark Box</button>
+              <button data-bs="neon" class="${c.banner_style==='neon'?'on':''}">⚡ Neon</button>
+              <button data-bs="none" class="${c.banner_style==='none'?'on':''}">🚫 Hidden</button>
             </div>
           </div>
         </div>
@@ -795,8 +823,11 @@ function buildEditor(){
         <!-- Panel 3: Subtitles & Captions -->
         <div class="studio-panel" id="spanel-captions">
           <div>
-            <label>Caption Style Preset</label>
-            <div class="styles" id="tpls"></div>
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0">Caption Style Preset</label>
+              <button id="dlSrtBtn" class="ghost fit" style="font-size:11.5px;padding:3px 8px" title="Download standard SRT subtitle file">📥 Download Subtitles (.SRT)</button>
+            </div>
+            <div class="styles" id="tpls" style="margin-top:6px"></div>
             <div class="row" style="margin-top:8px;gap:12px;flex-wrap:wrap">
               <label style="margin:0" class="fit"><input type="checkbox" id="capon" ${c.captions?'checked':''}> Burn captions</label>
               <label style="margin:0" class="fit"><input type="checkbox" id="hookzoom" ${c.hook_zoom!==0?'checked':''}> ⚡ 3s Hook Zoom</label>
@@ -908,13 +939,28 @@ function buildEditor(){
   <div class="studio-timeline">
     <div class="timeline-bar">
       <div style="font-weight:700;font-size:12px;color:var(--text);display:flex;align-items:center;gap:8px">
-        <span>🎬 Studio Multi-Track Timeline</span>
+        <span>🎬 Studio Timeline</span>
         <span class="muted small" id="dur"></span>
       </div>
-      <div class="timeline-tools">
-        <button id="stNow" title="Set In-Point to Playhead">[ Set Start</button>
-        <button id="enNow" title="Set Out-Point to Playhead">] Set End</button>
-        <button id="sfxAddPlayhead" class="primary" title="Add current selected SFX at playhead">➕ Add SFX at Playhead</button>
+      <div class="timeline-tools" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <div class="seg" id="tlViewSeg" style="margin:0" title="Zoom timeline into clip or out to whole video">
+          <button id="tlViewClip" class="on" style="padding:2px 8px;font-size:11px">🔍 Clip View</button>
+          <button id="tlViewFull" style="padding:2px 8px;font-size:11px">🌐 Whole Video</button>
+        </div>
+        <div class="row fit" style="gap:2px">
+          <button id="extStartMinus" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Extend clip 5s earlier">⏪ −5s</button>
+          <button id="stNow" title="Set In-Point to Playhead" style="padding:2px 7px;font-size:11px">[ In</button>
+          <button id="enNow" title="Set Out-Point to Playhead" style="padding:2px 7px;font-size:11px">Out ]</button>
+          <button id="extEndPlus" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Extend clip 5s longer">+5s ⏩</button>
+        </div>
+        <div class="row fit" style="gap:4px;align-items:center;background:#0f172a;padding:2px 6px;border-radius:6px;border:1px solid #334155;font-size:11px">
+          <span>In:</span>
+          <input id="inStartSec" style="width:48px;background:#1e293b;border:1px solid #475569;border-radius:4px;color:#fff;text-align:center;padding:1px 2px;font-size:11px" title="Clip start in seconds">
+          <span>Out:</span>
+          <input id="inEndSec" style="width:48px;background:#1e293b;border:1px solid #475569;border-radius:4px;color:#fff;text-align:center;padding:1px 2px;font-size:11px" title="Clip end in seconds">
+          <span id="clipLenBadge" style="color:#4ade80;font-weight:700">0.0s</span>
+        </div>
+        <button id="sfxAddPlayhead" class="primary" style="padding:2px 8px;font-size:11px" title="Add selected SFX at playhead">➕ Add SFX</button>
       </div>
     </div>
 
@@ -1210,9 +1256,98 @@ function buildEditor(){
   }
   $('#bannerStyle').onclick=guard(async e=>{
     const b=e.target.closest('[data-bs]');if(!b)return;
+    $('#bannerStyle').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
     await save({banner_style:b.dataset.bs});
     markSeg();drawBanner();
   });
+
+  // Banner Font & Size
+  const bszInp=$('#bannerSize'), bszVal=$('#bannerSizeVal');
+  const updateBannerSize = async val => {
+    val = Math.round(Math.max(0.5, Math.min(2.5, val)) * 100) / 100;
+    S.clip.banner_size = val;
+    if(bszInp) bszInp.value = val;
+    if(bszVal) bszVal.textContent = Math.round(val * 100) + '%';
+    drawBanner();
+    await save({banner_size: val});
+  };
+  if(bszInp){
+    bszInp.oninput=e=>{
+      S.clip.banner_size = +e.target.value;
+      if(bszVal) bszVal.textContent = Math.round(S.clip.banner_size * 100) + '%';
+      drawBanner();
+    };
+    bszInp.onchange=guard(e=>updateBannerSize(+e.target.value));
+  }
+  if($('#bannerSizeDown')) $('#bannerSizeDown').onclick=guard(()=>updateBannerSize((S.clip.banner_size||1.0)-0.1));
+  if($('#bannerSizeUp')) $('#bannerSizeUp').onclick=guard(()=>updateBannerSize((S.clip.banner_size||1.0)+0.1));
+  if($('#bannerSizeReset')) $('#bannerSizeReset').onclick=guard(()=>updateBannerSize(1.0));
+  if($('#bannerFont')){
+    $('#bannerFont').onclick=guard(async e=>{
+      const b=e.target.closest('[data-bf]');if(!b)return;
+      const bf=b.dataset.bf;
+      $('#bannerFont').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+      S.clip.banner_font=bf;
+      drawBanner();
+      await save({banner_font: bf});
+      toast('Font changed to '+bf);
+    });
+  }
+
+  // Subtitle Download
+  if($('#dlSrtBtn')){
+    $('#dlSrtBtn').onclick=guard(async ()=>{
+      const a=document.createElement('a');
+      a.href='/api/clips/'+S.cid+'/subtitles';
+      a.download='';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast('Subtitles (.SRT) downloaded!');
+    });
+  }
+
+  // Timeline Navigation & Lengthen Controls
+  if($('#tlViewClip')) $('#tlViewClip').onclick=()=>{
+    T.view='clip';
+    $('#tlViewClip').classList.add('on');
+    if($('#tlViewFull')) $('#tlViewFull').classList.remove('on');
+    drawTrim();
+  };
+  if($('#tlViewFull')) $('#tlViewFull').onclick=()=>{
+    T.view='full';
+    $('#tlViewFull').classList.add('on');
+    if($('#tlViewClip')) $('#tlViewClip').classList.remove('on');
+    drawTrim();
+  };
+  if($('#extStartMinus')) $('#extStartMinus').onclick=guard(async ()=>{
+    const ns=Math.max(0, S.clip.start - 5.0);
+    await setTimes(+ns.toFixed(2), +S.clip.end.toFixed(2));
+    toast('Clip extended 5s earlier.');
+  });
+  if($('#extEndPlus')) $('#extEndPlus').onclick=guard(async ()=>{
+    const dur=(S.video&&S.video.duration)||86400;
+    const ne=Math.min(dur, S.clip.end + 5.0);
+    await setTimes(+S.clip.start.toFixed(2), +ne.toFixed(2));
+    toast('Clip extended 5s longer.');
+  });
+  if($('#inStartSec')){
+    $('#inStartSec').onchange=guard(async e=>{
+      let ns=parseFloat(e.target.value);
+      if(isNaN(ns)) return;
+      ns=Math.max(0, Math.min(S.clip.end - 1.0, ns));
+      await setTimes(+ns.toFixed(2), +S.clip.end.toFixed(2));
+    });
+  }
+  if($('#inEndSec')){
+    $('#inEndSec').onchange=guard(async e=>{
+      let ne=parseFloat(e.target.value);
+      if(isNaN(ne)) return;
+      const dur=(S.video&&S.video.duration)||86400;
+      ne=Math.min(dur, Math.max(S.clip.start + 1.0, ne));
+      await setTimes(+S.clip.start.toFixed(2), +ne.toFixed(2));
+    });
+  }
 
   // Layout Engine
   $('#layout').onclick=guard(async e=>{
@@ -1601,11 +1736,15 @@ function drawBanner(){
     return;
   }
   box.hidden=false;
-  const cls=st==='dark_box'?'card_dark':(st==='neon'?'card_neon':'card_white');
+  const cls=st==='dark_box'?'card_dark':(st==='neon'?'card_neon':(st==='clean_text'?'card_clean':(st==='yellow_text'?'card_yellow':'card_white')));
   const bx = typeof c.banner_x === 'number' ? c.banner_x : 0.5;
   const by = typeof c.banner_y === 'number' ? c.banner_y : 0.12;
+  const bsz = typeof c.banner_size === 'number' ? c.banner_size : 1.0;
+  const bfont = c.banner_font || 'Impact, Arial, sans-serif';
   box.style.left = (bx * 100).toFixed(1) + '%';
   box.style.top = (by * 100).toFixed(1) + '%';
+  box.style.fontSize = (13 * bsz).toFixed(1) + 'px';
+  box.style.fontFamily = bfont;
   box.innerHTML=`<div class="${cls}"><span class="banner-drag-handle" title="Drag to move anywhere">⋮⋮</span><span>${esc(txt)}</span></div>`;
   if(strip&&txtNode){
     strip.hidden=false;
@@ -1659,6 +1798,7 @@ function markSeg(){
   if($('#aspectRatio'))$('#aspectRatio').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.aspect===(c.aspect_ratio||'9:16')));
   if($('#camShape'))$('#camShape').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.shape===(c.cam_shape||'rect')));
   if($('#bannerStyle'))$('#bannerStyle').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.bs===(c.banner_style||'white_box')));
+  if($('#bannerFont'))$('#bannerFont').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.bf===(c.banner_font||'Impact')));
   if($('#snapGrid'))$('#snapGrid').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.snap===(c.cam_corner||'tr')));
   if($('#dualSplitBox'))$('#dualSplitBox').hidden = c.layout !== 'stack';
   const ph=$('#phone');
@@ -1671,6 +1811,9 @@ function updDur(){
   const txt=`${(c.end-c.start).toFixed(1)}s (In: ${fmtLong(c.start)} / Out: ${fmtLong(c.end)})`;
   if($('#dur')) $('#dur').textContent=txt;
   if($('#studioDurBadge')) $('#studioDurBadge').textContent=(c.end-c.start).toFixed(1)+'s';
+  if($('#inStartSec') && document.activeElement !== $('#inStartSec')) $('#inStartSec').value = c.start.toFixed(1);
+  if($('#inEndSec') && document.activeElement !== $('#inEndSec')) $('#inEndSec').value = c.end.toFixed(1);
+  if($('#clipLenBadge')) $('#clipLenBadge').textContent = (c.end-c.start).toFixed(1)+'s';
 }
 async function saveSfx(list){await save({sfx:list});drawSfx();drawTrim()}
 function playSfx(x){try{const a=new Audio('/api/audio/sfx/'+encodeURIComponent(x.f));a.volume=Math.min(1,x.v);a.play()}catch{}}
@@ -1685,11 +1828,21 @@ function drawSfx(){
 }
 function sfxTick(){const v=$('#pv');if(!v||!S.clip)return;const t=v.currentTime,p=S.lastT??t;S.lastT=t;
   if(v.paused||v.muted||t<p||t-p>.5)return;(S.clip.sfx||[]).forEach(x=>{if(x.t>p&&x.t<=t)playSfx(x)})}
-const T={lo:0,hi:1,drag:false};
+const T={lo:0,hi:1,drag:false,view:'clip'};
 function tlTotal(){const v=$('#pv');return v&&isFinite(v.duration)&&v.duration>0?v.duration:(S.video&&S.video.duration)||S.clip.end+30}
 function drawTrim(s,e){
   if(!$('#tsel')||!S.clip)return;s=s??S.clip.start;e=e??S.clip.end;
-  if(!T.drag){const pad=Math.max(10,(S.clip.end-S.clip.start)*.6);T.lo=Math.max(0,S.clip.start-pad);T.hi=Math.max(T.lo+1,Math.min(tlTotal(),S.clip.end+pad))}
+  const total=tlTotal();
+  if(!T.drag){
+    if(T.view==='full'){
+      T.lo=0;
+      T.hi=Math.max(total, e + 1);
+    }else{
+      const pad=Math.max(20,(S.clip.end-S.clip.start)*.8);
+      T.lo=Math.max(0,S.clip.start-pad);
+      T.hi=Math.max(T.lo+1,Math.min(total,S.clip.end+pad));
+    }
+  }
   const X=t=>(t-T.lo)/(T.hi-T.lo)*100;
   $('#tsel').style.left=X(s)+'%';$('#tsel').style.width=Math.max(0,X(e)-X(s))+'%';
   
@@ -2086,7 +2239,7 @@ function drawCaption(){
     const sc=t.scale_active&&on?`transform:scale(${t.scale_active/100});`:'';
     return `<span style="color:${on?t.active:t.primary};${sc}">${esc(t.upper?w.w.toUpperCase():w.w)}</span>`;
   }).join(' ');
-  cap.style.cssText=`bottom:${(t.mv/1920*100).toFixed(1)}%;font:${t.bold?800:400} ${(t.size*k).toFixed(1)}px/1.15 Arial,Helvetica,sans-serif;text-shadow:${t.box?'none':tplShadow(t,k)}${t.glow?',0 0 '+(10*k*4).toFixed(0)+'px '+t.outline:''}`;
+  cap.style.cssText=`bottom:${(t.mv/1920*100).toFixed(1)}%;font:${t.bold?800:400} ${(t.size*k).toFixed(1)}px/1.15 ${t.font||'Arial'},Helvetica,sans-serif;text-shadow:${t.box?'none':tplShadow(t,k)}${t.glow?',0 0 '+(10*k*4).toFixed(0)+'px '+t.outline:''}`;
   cap.innerHTML=t.box?`<span style="background:#000b;padding:.1em .35em;border-radius:4px">${html}</span>`:html;
 }
 function drawCues(){

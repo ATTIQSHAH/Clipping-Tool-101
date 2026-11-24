@@ -2,7 +2,8 @@ import unittest
 import sqlite3
 import tempfile
 import os
-from clipforge.captions import to_ass
+from clipforge.captions import to_ass, to_srt
+from clipforge_web import engine
 import clipforge_web.db as db
 
 class TestFeatures(unittest.TestCase):
@@ -19,6 +20,18 @@ class TestFeatures(unittest.TestCase):
         self.assertIn("Style: Banner", ass_content)
         self.assertIn("Peak stream", ass_content)
         self.assertTrue("{\\an5\\pos(" in ass_content or "{\\an8}" in ass_content)
+
+        # Test transparent clean text banner without background box
+        ass_clean = to_ass(
+            cues,
+            banner_text="NO BACKGROUND TITLE",
+            banner_style="clean_text",
+            banner_size=1.4,
+            banner_font="Impact"
+        )
+        self.assertIn("Style: Banner,Impact,", ass_clean)
+        self.assertIn("NO BACKGROUND TITLE", ass_clean)
+        self.assertIn(",1,7,4,", ass_clean)  # BorderStyle=1 (no box, outline only)
 
         # Test dark card banner
         ass_dark = to_ass(
@@ -37,10 +50,39 @@ class TestFeatures(unittest.TestCase):
         )
         self.assertNotIn("Style: Banner", ass_none)
 
+    def test_to_srt(self):
+        cues = [
+            {'start': 1.25, 'end': 3.75, 'text': 'Hello world', 'words': [{'w': 'Hello', 'start': 1.25, 'end': 2.0}, {'w': 'world', 'start': 2.0, 'end': 3.75}]}
+        ]
+        srt = to_srt(cues)
+        self.assertIn("00:00:01,250 --> 00:00:03,750", srt)
+        self.assertIn("Hello world", srt)
+
+    def test_clip_words_zero_relative_and_timeline(self):
+        # Timeline coordinates
+        c_timeline = {
+            'start': 100.0, 'end': 120.0,
+            'words': [{'w': 'First', 'start': 101.0, 'end': 102.0}, {'w': 'Second', 'start': 103.0, 'end': 104.0}]
+        }
+        res1 = engine.clip_words(c_timeline)
+        self.assertEqual(len(res1), 2)
+        self.assertEqual(res1[0]['w'], 'First')
+        self.assertEqual(res1[0]['start'], 1.0)
+
+        # 0-relative coordinates (e.g. from cut clip)
+        c_zero = {
+            'start': 100.0, 'end': 120.0,
+            'words': [{'w': 'RelFirst', 'start': 1.0, 'end': 2.0}, {'w': 'RelSecond', 'start': 3.0, 'end': 4.0}]
+        }
+        res2 = engine.clip_words(c_zero)
+        self.assertEqual(len(res2), 2)
+        self.assertEqual(res2[0]['w'], 'RelFirst')
+        self.assertEqual(res2[0]['start'], 1.0)
+
     def test_db_columns(self):
         c = db.conn()
         cols = [r[1] for r in c.execute("PRAGMA table_info(clips)").fetchall()]
-        for expected in ["cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style", "game_zoom", "crop_y", "banner_x", "banner_y"]:
+        for expected in ["cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style", "game_zoom", "crop_y", "banner_x", "banner_y", "banner_size", "banner_font"]:
             self.assertIn(expected, cols, f"Column {expected} missing from clips table")
 
 if __name__ == '__main__':

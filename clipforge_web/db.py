@@ -27,6 +27,7 @@ create table if not exists clips(
   cam_zoom real default 1.0, cam_shape text default 'rect', cam_pos text default 'top',
   cam_pos_x real default 0.5, cam_pos_y real default 0.65, banner_text text default '', banner_style text default 'white_box',
   banner_x real default 0.5, banner_y real default 0.12,
+  banner_size real default 1.0, banner_font text default 'Arial',
   split_ratio real default 0.5, cam_corner text default 'tr',
   cam_crop_x real default 0.5, cam_crop_y real default 0.5,
   game_zoom real default 1.0, crop_y real default 0.5,
@@ -77,6 +78,8 @@ MIGRATE = {
         ("crop_y", "real default 0.5"),
         ("banner_x", "real default 0.5"),
         ("banner_y", "real default 0.12"),
+        ("banner_size", "real default 1.0"),
+        ("banner_font", "text default 'Arial'"),
     ],
 }
 

@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
-from clipforge import ai, audiolib, source
+from clipforge import ai, audiolib, captions, source
 from clipforge.captions import TEMPLATES
 from clipforge.render import RES
 from clipforge.util import which, silent_flags
@@ -18,7 +18,7 @@ CLIP_FIELDS = {
     "title", "template", "layout", "res", "crop_x", "crop_y", "music", "sfx_intro", "sfx_peak",
     "captions", "status", "words", "hook_zoom", "emojis", "censor", "sfx",
     "cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style",
-    "banner_x", "banner_y", "split_ratio", "cam_corner", "cam_crop_x", "cam_crop_y", "game_zoom", "aspect_ratio"
+    "banner_x", "banner_y", "banner_size", "banner_font", "split_ratio", "cam_corner", "cam_crop_x", "cam_crop_y", "game_zoom", "aspect_ratio"
 }
 
 
@@ -454,19 +454,19 @@ def patch_clip(cid: int, body: dict = Body(...)):
         sets.append(f"{k}=?")
         if k in ("res", "captions", "hook_zoom", "emojis", "censor"):
             vals.append(int(val))
-        elif k in ("crop_x", "cam_zoom", "cam_pos_x", "cam_pos_y", "split_ratio", "cam_crop_x", "cam_crop_y"):
+        elif k in ("crop_x", "cam_zoom", "cam_pos_x", "cam_pos_y", "split_ratio", "cam_crop_x", "cam_crop_y", "banner_size", "banner_x", "banner_y", "game_zoom", "crop_y"):
             vals.append(float(val))
         else:
             vals.append(str(val) if val is not None else "")
     if "cam_corner" in body or "layout" in body:
         sets.append("cam=null")
     if "start" in body or "end" in body:
-        limit = v["duration"] if not c["src"] else (c["we"] or v["duration"])
+        v_dur = float(v.get("duration") or 86400.0)
         s, e = float(body.get("start", c["start"])), float(body.get("end", c["end"]))
-        if e - s < 3.0 or s < 0 or e > limit + 0.5:
-            raise HTTPException(400, f"Clip must be between 3s and {limit:.1f}s.")
+        if e - s < 1.0 or s < 0 or e > v_dur + 5.0:
+            raise HTTPException(400, f"Clip must be between 1s and {v_dur:.1f}s.")
         sets += ["start=?", "end=?"]
-        vals += [s, e]
+        vals += [round(s, 3), round(e, 3)]
     if sets:
         sets.append("render_status=case when render_status='done' then 'stale' else render_status end")
         db.ex(f"update clips set {','.join(sets)} where id=?", vals + [cid])
@@ -532,6 +532,18 @@ def update_cue(cid: int, body: dict = Body(...)):
     db.ex("update clips set words=?, render_status=case when render_status='done' then 'stale' else render_status end where id=?",
           (db.dumps(new_words), cid))
     return _format_cues(engine.clip_cues(_clip(cid)))
+
+
+@app.get("/api/clips/{cid}/subtitles")
+def clip_subtitles(cid: int, format: str = "srt"):
+    c = _clip(cid)
+    cues = engine.clip_cues(c)
+    if not cues:
+        raise HTTPException(404, "No subtitles available for this clip.")
+    srt_data = captions.to_srt(cues)
+    filename = re.sub(r"[^\w\-.]+", "_", c["title"] or f"clip_{cid}").strip("_") + ".srt"
+    return Response(content=srt_data, media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 def _thumb(src, t, out):

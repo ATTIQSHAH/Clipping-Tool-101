@@ -72,7 +72,9 @@ def transcribe_file(wav, model="base", device="cpu", compute="int8", language=No
         off = max(pos - PAD, 0.0)
         audio = _load_wav(wav, off, pos + CHUNK + PAD)
         with _lock:
+            vad_params = dict(min_silence_duration_ms=350, speech_pad_ms=250)
             segs, _ = _model.transcribe(audio, word_timestamps=True, vad_filter=True,
+                                        vad_parameters=vad_params, beam_size=5,
                                         language=language, condition_on_previous_text=False)
             for s in segs:
                 if should_stop:
