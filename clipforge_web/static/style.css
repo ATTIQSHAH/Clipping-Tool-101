@@ -177,11 +177,13 @@ dialog::backdrop{background:#000a;backdrop-filter:blur(3px)}
 .cptab-panel{display:none}
 .cptab-panel.on{display:flex;flex-direction:column;gap:12px}
 
-/* Headline Banner Card */
-.bannerBox{position:absolute;top:24px;left:14px;right:14px;z-index:15;text-align:center;pointer-events:none}
-.bannerBox .card_white{background:#fff;color:#000;font-weight:800;font-size:12.5px;line-height:1.28;padding:6px 10px;border-radius:6px;display:inline-block;box-shadow:0 4px 12px #000c}
-.bannerBox .card_dark{background:#000d;color:#fff;font-weight:800;font-size:12.5px;line-height:1.28;padding:6px 10px;border-radius:6px;display:inline-block;border:1px solid #444;box-shadow:0 4px 12px #000c}
-.bannerBox .card_neon{background:#000e;color:#00f2fe;font-weight:900;font-size:12.5px;line-height:1.28;padding:6px 10px;border-radius:6px;display:inline-block;border:1px solid #00f2fe;text-shadow:0 0 8px #00f2fe}
+/* Headline Banner Card (Draggable anywhere) */
+.bannerBox{position:absolute;top:12%;left:50%;transform:translate(-50%, -50%);z-index:25;text-align:center;pointer-events:auto;cursor:grab;user-select:none;touch-action:none;max-width:92%}
+.bannerBox:active,.bannerBox.dragging{cursor:grabbing!important}
+.bannerBox .card_white{background:#fff;color:#000;font-weight:800;font-size:12.5px;line-height:1.28;padding:6px 12px;border-radius:99px;display:inline-flex;align-items:center;box-shadow:0 6px 20px #000c;border:1px solid rgba(255,255,255,0.85)}
+.bannerBox .card_dark{background:#000d;color:#fff;font-weight:800;font-size:12.5px;line-height:1.28;padding:6px 12px;border-radius:99px;display:inline-flex;align-items:center;border:1px solid #444;box-shadow:0 6px 20px #000c}
+.bannerBox .card_neon{background:#000e;color:#00f2fe;font-weight:900;font-size:12.5px;line-height:1.28;padding:6px 12px;border-radius:99px;display:inline-flex;align-items:center;border:1.5px solid #00f2fe;box-shadow:0 0 16px rgba(0,242,254,0.45);text-shadow:0 0 8px #00f2fe}
+.banner-drag-handle{font-size:10px;opacity:0.65;margin-right:5px;cursor:grab}
 
 /* Preset chips */
 .preset-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
@@ -417,15 +419,22 @@ body.studio-open {
   cursor: default;
 }
 
-/* Headline Hook Text Banner Card (Matching Image 2) */
+/* Headline Hook Text Banner Card (Draggable anywhere) */
 .bannerBox {
   position: absolute;
-  top: 24px;
-  left: 12px;
-  right: 12px;
-  z-index: 15;
+  top: 12%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 25;
   text-align: center;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  max-width: 92%;
+}
+.bannerBox:active, .bannerBox.dragging {
+  cursor: grabbing !important;
 }
 .bannerBox .card_white {
   background: #ffffff;
@@ -436,10 +445,11 @@ body.studio-open {
   line-height: 1.35;
   padding: 8px 14px;
   border-radius: 99px;
-  display: inline-block;
-  max-width: 90%;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
   box-shadow: 0 8px 24px rgba(0,0,0,0.6), 0 2px 6px rgba(0,0,0,0.3);
-  border: 1px solid rgba(255,255,255,0.8);
+  border: 1px solid rgba(255,255,255,0.85);
 }
 .bannerBox .card_dark {
   background: rgba(15,20,36,0.92);
@@ -449,8 +459,9 @@ body.studio-open {
   line-height: 1.35;
   padding: 8px 14px;
   border-radius: 99px;
-  display: inline-block;
-  max-width: 90%;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
   border: 1px solid #3b4566;
   box-shadow: 0 8px 24px rgba(0,0,0,0.6);
 }
@@ -462,8 +473,9 @@ body.studio-open {
   line-height: 1.35;
   padding: 8px 14px;
   border-radius: 99px;
-  display: inline-block;
-  max-width: 90%;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
   border: 1.5px solid #38bdf8;
   box-shadow: 0 0 16px rgba(56,189,248,0.4);
 }

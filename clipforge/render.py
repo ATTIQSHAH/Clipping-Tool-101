@@ -39,7 +39,8 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
                 encoder="libx264", fps=30, res=1080, music=None, music_vol=0.18, duck=True, sfx=(),
                 track=None, hook_zoom=True, on_progress=None,
                 cam_zoom=1.0, cam_shape="rect", cam_pos="top", cam_pos_x=0.5, cam_pos_y=0.65, split_ratio=0.5,
-                cam_crop_x=0.5, cam_crop_y=0.5, cam_corner="tr", aspect_ratio="9:16"):
+                cam_crop_x=0.5, cam_crop_y=0.5, cam_corner="tr", aspect_ratio="9:16",
+                game_zoom=1.0, crop_y=0.5):
     base = int(res or 1080)
     aspect = str(aspect_ratio or "9:16").strip()
     if aspect == "1:1":
@@ -116,8 +117,22 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         top_share = max(0.25, min(float(split_ratio or 0.5), 0.75))
         th = int(H * top_share) // 2 * 2
         bh = H - th
-        gw = min(w, int(h * W / bh)) // 2 * 2
-        gx = int((w - gw) * min(max(crop_x, 0), 1)) // 2 * 2
+
+        # Gameplay crop with game_zoom and crop_x, crop_y
+        gz = max(0.4, min(float(game_zoom or 1.0), 3.0))
+        bot_aspect = W / bh
+        if w / h > bot_aspect:
+            gh = max(32, min(h, int(h / gz))) // 2 * 2
+            gw = max(32, min(w, int(gh * bot_aspect))) // 2 * 2
+        else:
+            gw = max(32, min(w, int(w / gz))) // 2 * 2
+            gh = max(32, min(h, int(gw / bot_aspect))) // 2 * 2
+        px_g = max(0.0, min(1.0, float(crop_x if crop_x is not None else 0.5)))
+        py_g = max(0.0, min(1.0, float(crop_y if crop_y is not None else 0.5)))
+        gx = int(min(max((w - gw) * px_g, 0), w - gw)) // 2 * 2
+        gy = int(min(max((h - gh) * py_g, 0), h - gh)) // 2 * 2
+
+        # Streamer reaction crop with cam_zoom and cam_crop_x, cam_crop_y
         if not cam:
             corner = cam_corner or cam_pos or "bl"
             if corner == "tl":
@@ -135,33 +150,32 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         else:
             cx, cy, cw_, ch_ = cam
 
+        cz = max(0.4, min(float(cam_zoom or 1.0), 3.0))
         top_aspect = W / th
         if cw_ / ch_ > top_aspect:
-            sch = int(ch_) // 2 * 2
-            scw = int(sch * top_aspect) // 2 * 2
+            sch = max(32, min(h, int(ch_ / cz))) // 2 * 2
+            scw = max(32, min(w, int(sch * top_aspect))) // 2 * 2
         else:
-            scw = int(cw_) // 2 * 2
-            sch = int(scw / top_aspect) // 2 * 2
-        scw = min(w, max(64, scw))
-        sch = min(h, max(64, sch))
+            scw = max(32, min(w, int(cw_ / cz))) // 2 * 2
+            sch = max(32, min(h, int(scw / top_aspect))) // 2 * 2
 
-        px = max(0.0, min(1.0, float(cam_crop_x if cam_crop_x is not None else 0.5)))
-        py = max(0.0, min(1.0, float(cam_crop_y if cam_crop_y is not None else 0.5)))
-        scx = int(min(max(cx + (cw_ - scw) * px, 0), w - scw)) // 2 * 2
-        scy = int(min(max(cy + (ch_ - sch) * py, 0), h - sch)) // 2 * 2
+        px_c = max(0.0, min(1.0, float(cam_crop_x if cam_crop_x is not None else 0.5)))
+        py_c = max(0.0, min(1.0, float(cam_crop_y if cam_crop_y is not None else 0.5)))
+        scx = int(min(max(cx + (cw_ - scw) * px_c, 0), w - scw)) // 2 * 2
+        scy = int(min(max(cy + (ch_ - sch) * py_c, 0), h - sch)) // 2 * 2
 
         # Enhance upscaled webcam/streamer crop with unsharp filter for crisp facial detail
         cam_filter = f"scale={W}:{th}:flags=lanczos,unsharp=5:5:0.7:5:5:0.0"
 
         if cam_pos in ("bottom", "bl", "br", "bc"):
             # Streamer on bottom, gameplay on top
-            fc = (f"[0:v]split[a][b];[b]crop={gw}:{h}:{gx}:0,scale={W}:{bh}:flags=lanczos[top];"
+            fc = (f"[0:v]split[a][b];[b]crop={gw}:{gh}:{gx}:{gy},scale={W}:{bh}:flags=lanczos[top];"
                   f"[a]crop={scw}:{sch}:{scx}:{scy},{cam_filter}[bot];"
                   f"[top][bot]vstack,setsar=1{zoom},ass={ass}[v]")
         else:
             # Streamer on top (default), gameplay on bottom
             fc = (f"[0:v]split[a][b];[a]crop={scw}:{sch}:{scx}:{scy},{cam_filter}[top];"
-                  f"[b]crop={gw}:{h}:{gx}:0,scale={W}:{bh}:flags=lanczos[bot];"
+                  f"[b]crop={gw}:{gh}:{gx}:{gy},scale={W}:{bh}:flags=lanczos[bot];"
                   f"[top][bot]vstack,setsar=1{zoom},ass={ass}[v]")
     elif layout in ("blur", "stack", "pip") or w / h <= target_ratio + 0.01:
         fc = (f"[0:v]split[a][b];[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
@@ -174,16 +188,17 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         x0 = write_sendcmd(track["pts"], os.path.join(tmp, cmd_name))
         fc = (f"[0:v]sendcmd=f={cmd_name},crop={cw}:{h}:{x0}:0,scale={W}:{H}:flags=lanczos,setsar=1{zoom},ass={ass}[v]")
     else:
+        gz = max(0.4, min(float(game_zoom or 1.0), 3.0))
         if w / h > target_ratio:
-            cw = int(h * target_ratio) // 2 * 2
-            ch = h
-            x = int((w - cw) * min(max(crop_x, 0), 1)) // 2 * 2
-            y = 0
+            ch = max(32, min(h, int(h / gz))) // 2 * 2
+            cw = max(32, min(w, int(ch * target_ratio))) // 2 * 2
         else:
-            cw = w
-            ch = int(w / target_ratio) // 2 * 2
-            x = 0
-            y = int((h - ch) * 0.5) // 2 * 2
+            cw = max(32, min(w, int(w / gz))) // 2 * 2
+            ch = max(32, min(h, int(cw / target_ratio))) // 2 * 2
+        px_g = max(0.0, min(1.0, float(crop_x if crop_x is not None else 0.5)))
+        py_g = max(0.0, min(1.0, float(crop_y if crop_y is not None else 0.5)))
+        x = int(min(max((w - cw) * px_g, 0), w - cw)) // 2 * 2
+        y = int(min(max((h - ch) * py_g, 0), h - ch)) // 2 * 2
         fc = f"[0:v]crop={cw}:{ch}:{x}:{y},scale={W}:{H}:flags=lanczos,setsar=1{zoom},ass={ass}[v]"
     af, extra_in = _audio_graph(music, music_vol, duck, sfx, 1)
     cmd = ([ffmpeg, "-nostdin", "-y", "-ss", f"{s:.3f}", "-t", f"{dur:.3f}", "-i", os.path.abspath(src)] + extra_in +

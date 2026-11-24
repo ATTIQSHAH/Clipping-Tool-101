@@ -15,10 +15,10 @@ app = FastAPI(title="ClipForge")
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 EXTS = {".mp4", ".mov", ".mkv", ".webm"}
 CLIP_FIELDS = {
-    "title", "template", "layout", "res", "crop_x", "music", "sfx_intro", "sfx_peak",
+    "title", "template", "layout", "res", "crop_x", "crop_y", "music", "sfx_intro", "sfx_peak",
     "captions", "status", "words", "hook_zoom", "emojis", "censor", "sfx",
     "cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style",
-    "split_ratio", "cam_corner", "cam_crop_x", "cam_crop_y", "aspect_ratio"
+    "banner_x", "banner_y", "split_ratio", "cam_corner", "cam_crop_x", "cam_crop_y", "game_zoom", "aspect_ratio"
 }
 
 
@@ -118,6 +118,12 @@ def _clip_out(c):
     o["rendered"] = bool(c["render_path"] and os.path.exists(c["render_path"]))
     o["split_ratio"] = float(c.get("split_ratio") or 0.5)
     o["cam_corner"] = c.get("cam_corner") or "tr"
+    o["cam_zoom"] = float(c.get("cam_zoom") or 1.0)
+    o["game_zoom"] = float(c.get("game_zoom") or 1.0)
+    o["crop_x"] = float(c.get("crop_x") if c.get("crop_x") is not None else 0.5)
+    o["crop_y"] = float(c.get("crop_y") if c.get("crop_y") is not None else 0.5)
+    o["banner_x"] = float(c.get("banner_x") if c.get("banner_x") is not None else 0.5)
+    o["banner_y"] = float(c.get("banner_y") if c.get("banner_y") is not None else 0.12)
     if c["render_status"] == "failed":
         j = db.q("select error from jobs where type='render' and ref_id=? and status='failed' order by id desc limit 1",
                  (c["id"],), one=True)
@@ -495,10 +501,28 @@ def clip_video(cid: int):
     return FileResponse(p, media_type="video/mp4" if p.endswith(".mp4") else "video/webm")
 
 
+def _format_cues(cues):
+    out = []
+    for q in cues:
+        ws = q.get("words") or []
+        first = ws[0].get("i", 0) if ws else 0
+        last = ws[-1].get("i", 0) if ws else 0
+        text = q.get("text") or " ".join(w.get("w", "") for w in ws)
+        out.append({
+            "first": first,
+            "last": last,
+            "start": round(float(q.get("start", 0.0)), 3),
+            "end": round(float(q.get("end", 0.0)), 3),
+            "text": text,
+            "words": [{"w": w.get("w", ""), "start": round(float(w.get("start", 0.0)), 3), "end": round(float(w.get("end", 0.0)), 3)} for w in ws]
+        })
+    return out
+
+
 @app.get("/api/clips/{cid}/cues")
 def get_cues(cid: int):
     c = _clip(cid)
-    return engine.clip_cues(c)
+    return _format_cues(engine.clip_cues(c))
 
 
 @app.patch("/api/clips/{cid}/cue")
@@ -507,7 +531,7 @@ def update_cue(cid: int, body: dict = Body(...)):
     new_words = engine.edit_cue(c, int(body["first"]), int(body["last"]), str(body["text"]))
     db.ex("update clips set words=?, render_status=case when render_status='done' then 'stale' else render_status end where id=?",
           (db.dumps(new_words), cid))
-    return engine.clip_cues(_clip(cid))
+    return _format_cues(engine.clip_cues(_clip(cid)))
 
 
 def _thumb(src, t, out):

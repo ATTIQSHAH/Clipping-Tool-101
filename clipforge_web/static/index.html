@@ -675,10 +675,26 @@ function buildEditor(){
             <div class="cam-drag-tip" style="margin-top:6px">💡 Click ↙ Bottom-Left (Speed) or Drag & Select to outline exact webcam box!</div>
           </div>
 
-          <div>
-            <label>Streamer Cam Zoom: <b id="zoomVal" style="color:var(--accent)">${Math.round((c.cam_zoom || 1.0) * 100)}%</b></label>
-            <input id="camZoom" type="range" min="0.5" max="2.5" step="0.05" value="${c.cam_zoom || 1.0}">
-            <div class="row muted small"><span>0.5x Wide</span><span style="flex:1;text-align:center">1.0x Normal</span><span>2.5x Close</span></div>
+          <!-- Streamer Camera Zoom & Framing -->
+          <div class="card" style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0;font-weight:700">Streamer Cam Zoom: <b id="zoomVal" style="color:var(--accent)">${Math.round((c.cam_zoom || 1.0) * 100)}%</b></label>
+              <div class="row fit" style="gap:4px">
+                <button id="camZoomOut" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Zoom out streamer">🔍−</button>
+                <button id="camZoomReset" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Reset streamer zoom">1.0x</button>
+                <button id="camZoomIn" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Zoom in streamer">🔍+</button>
+              </div>
+            </div>
+            <input id="camZoom" type="range" min="0.4" max="3.0" step="0.05" value="${c.cam_zoom || 1.0}">
+            <div class="row muted small"><span>0.4x Wide</span><span style="flex:1;text-align:center">1.0x Normal</span><span>3.0x Close</span></div>
+
+            <div style="margin-top:8px">
+              <label style="font-size:11.5px;margin-bottom:2px">Streamer Framing Pan (X / Y)</label>
+              <div class="row" style="gap:8px">
+                <div style="flex:1"><small class="muted" style="font-size:10px">Pan X</small><input id="camPanX" type="range" min="0" max="1" step="0.01" value="${c.cam_crop_x ?? 0.5}"></div>
+                <div style="flex:1"><small class="muted" style="font-size:10px">Pan Y</small><input id="camPanY" type="range" min="0" max="1" step="0.01" value="${c.cam_crop_y ?? 0.5}"></div>
+              </div>
+            </div>
           </div>
 
           <div>
@@ -689,10 +705,28 @@ function buildEditor(){
             </div>
           </div>
 
-          <div>
-            <label>Gameplay Horizontal Pan</label>
-            <input id="cx" type="range" min="0" max="1" step="0.01" value="${c.crop_x}" aria-label="Crop position">
+          <!-- Gameplay Screen Zoom & Pan Controls -->
+          <div class="card" style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0;font-weight:700">Gameplay Screen Zoom: <b id="gameZoomVal" style="color:var(--accent)">${Math.round((c.game_zoom || 1.0) * 100)}%</b></label>
+              <div class="row fit" style="gap:4px">
+                <button id="gameZoomOut" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Zoom out gameplay">🔍−</button>
+                <button id="gameZoomReset" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Reset gameplay zoom">1.0x</button>
+                <button id="gameZoomIn" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Zoom in gameplay">🔍+</button>
+              </div>
+            </div>
+            <input id="gameZoom" type="range" min="0.4" max="3.0" step="0.05" value="${c.game_zoom || 1.0}">
+            <div class="row muted small"><span>0.4x Wide</span><span style="flex:1;text-align:center">1.0x Normal</span><span>3.0x Close</span></div>
+
+            <div style="margin-top:8px">
+              <label style="font-size:11.5px;margin-bottom:2px">Gameplay Screen Pan (X / Y)</label>
+              <div class="row" style="gap:8px">
+                <div style="flex:1"><small class="muted" style="font-size:10px">Pan X</small><input id="cx" type="range" min="0" max="1" step="0.01" value="${c.crop_x ?? 0.5}" aria-label="Gameplay horizontal crop position"></div>
+                <div style="flex:1"><small class="muted" style="font-size:10px">Pan Y</small><input id="cy" type="range" min="0" max="1" step="0.01" value="${c.crop_y ?? 0.5}" aria-label="Gameplay vertical crop position"></div>
+              </div>
+            </div>
           </div>
+          <div class="cam-drag-tip" style="margin-top:2px">💡 Tip: In the preview monitor, you can use your mouse wheel over either screen to zoom in/out, or click & drag to pan!</div>
         </div>
 
         <!-- Panel 2: Viral Hook Text -->
@@ -707,6 +741,16 @@ function buildEditor(){
               <button data-txt="BRO DID NOT JUST DO THAT 💀">BRO DID NOT 💀</button>
               <button data-txt="WATCH TILL THE VERY END ⚠️">WATCH TILL END ⚠️</button>
             </div>
+          </div>
+
+          <div>
+            <label>Title Card Position (Drag on screen or pick preset)</label>
+            <div class="preset-chips" id="bannerPosChips">
+              <button data-pos="top">⬆️ Top Hook</button>
+              <button data-pos="middle">↕️ Center Screen</button>
+              <button data-pos="bottom">⬇️ Bottom Hook</button>
+            </div>
+            <p class="muted small" style="margin:4px 0 0">✨ <b>Draggable Anywhere:</b> You can grab and move the title card anywhere on the video preview screen!</p>
           </div>
 
           <div>
@@ -900,7 +944,11 @@ function buildEditor(){
   const v=$('#pv');
   v.src='/api/clips/'+c.id+'/source#t='+c.start;
   const onReady=()=>{ applyLayout(); drawCaption(); drawBanner(); drawTrim(); updateTimeCode(); };
-  v.addEventListener('loadedmetadata',()=>{ if(v.currentTime < S.clip.start) v.currentTime=S.clip.start; onReady(); });
+  v.addEventListener('loadedmetadata',()=>{
+    const isFull = v.duration && v.duration > (S.clip.end - S.clip.start) + 2.5;
+    if(isFull && v.currentTime < S.clip.start) v.currentTime = S.clip.start;
+    onReady();
+  });
   v.addEventListener('loadeddata', onReady);
   v.addEventListener('canplay', onReady);
   v.addEventListener('timeupdate',()=>{ onTime(); updateTimeCode(); });
@@ -909,13 +957,23 @@ function buildEditor(){
   v.addEventListener('play',()=>{$('#play').textContent='⏸';(function loop(){drawCaption();drawBanner();applyLayout();drawPh();sfxTick();if(!v.paused)requestAnimationFrame(loop)})()});
   v.addEventListener('pause',()=>{$('#play').textContent='▶'; onReady();});
 
-  markSeg();drawCues();updateApproveUI();updDur();drawTrim();trimEvents();drawBanner();initCanvasDrag();initTimelineTracks();initPcUpload();
+  markSeg();drawCues();updateApproveUI();updDur();drawTrim();trimEvents();drawBanner();initBannerDrag();initCanvasDrag();initTimelineTracks();initPcUpload();
 
   // Exit Studio
   $('#closeStudio').onclick=()=>{S.cid=null;S.clip=null;showEditor(false);drawCands();drawMap()};
   $('#play').onclick=playClip;
-  $('#stepBack').onclick=()=>{v.currentTime=Math.max(S.clip.start,v.currentTime-0.5);drawPh();updateTimeCode()};
-  $('#stepFwd').onclick=()=>{v.currentTime=Math.min(S.clip.end,v.currentTime+0.5);drawPh();updateTimeCode()};
+  $('#stepBack').onclick=()=>{
+    const isCut = (v.duration && v.duration <= (c.end - c.start) + 2.5);
+    const minT = isCut ? 0 : c.start;
+    v.currentTime = Math.max(minT, v.currentTime - 0.5);
+    drawPh();updateTimeCode();
+  };
+  $('#stepFwd').onclick=()=>{
+    const isCut = (v.duration && v.duration <= (c.end - c.start) + 2.5);
+    const maxT = isCut ? (c.end - c.start) : c.end;
+    v.currentTime = Math.min(maxT, v.currentTime + 0.5);
+    drawPh();updateTimeCode();
+  };
   $('#snd').onchange=e=>v.muted=!e.target.checked;
   $('#approve').onclick=guard(()=>approve(S.cid));
   $('#reject').onclick=guard(()=>save({status:'rejected'}).then(()=>{toast('Rejected.');showEditor(false)}));
@@ -1031,15 +1089,69 @@ function buildEditor(){
     markSeg();applyLayout();
   });
 
-  // Streamer Zoom
+  // Streamer Cam Zoom Controls
   const zoomInp=$('#camZoom'), zoomVal=$('#zoomVal');
+  const updateCamZoom = async val => {
+    val = Math.round(Math.max(0.4, Math.min(3.0, val)) * 100) / 100;
+    S.clip.cam_zoom = val;
+    if(zoomInp) zoomInp.value = val;
+    if(zoomVal) zoomVal.textContent = Math.round(val * 100) + '%';
+    applyLayout();
+    await save({cam_zoom: val});
+  };
   if(zoomInp){
     zoomInp.oninput=e=>{
       S.clip.cam_zoom = +e.target.value;
       if(zoomVal) zoomVal.textContent = Math.round(S.clip.cam_zoom * 100) + '%';
       applyLayout();
     };
-    zoomInp.onchange=guard(e=>save({cam_zoom:+e.target.value}));
+    zoomInp.onchange=guard(e=>updateCamZoom(+e.target.value));
+  }
+  if($('#camZoomIn')) $('#camZoomIn').onclick=guard(()=>updateCamZoom((S.clip.cam_zoom||1.0)+0.1));
+  if($('#camZoomOut')) $('#camZoomOut').onclick=guard(()=>updateCamZoom((S.clip.cam_zoom||1.0)-0.1));
+  if($('#camZoomReset')) $('#camZoomReset').onclick=guard(()=>updateCamZoom(1.0));
+
+  // Streamer Pan Controls
+  const panXInp=$('#camPanX'), panYInp=$('#camPanY');
+  if(panXInp){
+    panXInp.oninput=e=>{ S.clip.cam_crop_x = +e.target.value; applyLayout(); };
+    panXInp.onchange=guard(e=>save({cam_crop_x: +e.target.value}));
+  }
+  if(panYInp){
+    panYInp.oninput=e=>{ S.clip.cam_crop_y = +e.target.value; applyLayout(); };
+    panYInp.onchange=guard(e=>save({cam_crop_y: +e.target.value}));
+  }
+
+  // Gameplay Screen Zoom Controls
+  const gameZoomInp=$('#gameZoom'), gameZoomVal=$('#gameZoomVal');
+  const updateGameZoom = async val => {
+    val = Math.round(Math.max(0.4, Math.min(3.0, val)) * 100) / 100;
+    S.clip.game_zoom = val;
+    if(gameZoomInp) gameZoomInp.value = val;
+    if(gameZoomVal) gameZoomVal.textContent = Math.round(val * 100) + '%';
+    applyLayout();
+    await save({game_zoom: val});
+  };
+  if(gameZoomInp){
+    gameZoomInp.oninput=e=>{
+      S.clip.game_zoom = +e.target.value;
+      if(gameZoomVal) gameZoomVal.textContent = Math.round(S.clip.game_zoom * 100) + '%';
+      applyLayout();
+    };
+    gameZoomInp.onchange=guard(e=>updateGameZoom(+e.target.value));
+  }
+  if($('#gameZoomIn')) $('#gameZoomIn').onclick=guard(()=>updateGameZoom((S.clip.game_zoom||1.0)+0.1));
+  if($('#gameZoomOut')) $('#gameZoomOut').onclick=guard(()=>updateGameZoom((S.clip.game_zoom||1.0)-0.1));
+  if($('#gameZoomReset')) $('#gameZoomReset').onclick=guard(()=>updateGameZoom(1.0));
+
+  // Gameplay Pan Controls
+  if($('#cx')){
+    $('#cx').oninput=e=>{ S.clip.crop_x=+e.target.value; applyLayout(); };
+    $('#cx').onchange=guard(e=>save({crop_x:+e.target.value}));
+  }
+  if($('#cy')){
+    $('#cy').oninput=e=>{ S.clip.crop_y=+e.target.value; applyLayout(); };
+    $('#cy').onchange=guard(e=>save({crop_y:+e.target.value}));
   }
 
   // Hook Text
@@ -1056,6 +1168,18 @@ function buildEditor(){
     drawBanner();
     await save({banner_text:txt});
   });
+  if($('#bannerPosChips')){
+    $('#bannerPosChips').onclick=guard(async e=>{
+      const b=e.target.closest('[data-pos]');if(!b)return;
+      const pos=b.dataset.pos;
+      if(pos==='top'){ S.clip.banner_x=0.5; S.clip.banner_y=0.12; }
+      else if(pos==='middle'){ S.clip.banner_x=0.5; S.clip.banner_y=0.50; }
+      else if(pos==='bottom'){ S.clip.banner_x=0.5; S.clip.banner_y=0.85; }
+      drawBanner();
+      await save({banner_x: S.clip.banner_x, banner_y: S.clip.banner_y});
+      toast('Title card moved to '+pos+' position.');
+    });
+  }
   $('#bannerStyle').onclick=guard(async e=>{
     const b=e.target.closest('[data-bs]');if(!b)return;
     await save({banner_style:b.dataset.bs});
@@ -1167,10 +1291,12 @@ function initCanvasDrag(){
           S.canvasDrag = {
             mode: 'game_pan',
             startX: mx,
+            startY: my,
             initialX: typeof c.crop_x === 'number' ? c.crop_x : 0.5,
+            initialY: typeof c.crop_y === 'number' ? c.crop_y : 0.5,
             moved: false
           };
-          cv.style.cursor = 'ew-resize';
+          cv.style.cursor = 'move';
         }
       }
       e.preventDefault();
@@ -1198,10 +1324,12 @@ function initCanvasDrag(){
         S.canvasDrag = {
           mode: 'game_pan',
           startX: mx,
+          startY: my,
           initialX: typeof c.crop_x === 'number' ? c.crop_x : 0.5,
+          initialY: typeof c.crop_y === 'number' ? c.crop_y : 0.5,
           moved: false
         };
-        cv.style.cursor = 'ew-resize';
+        cv.style.cursor = 'move';
       }
       e.preventDefault();
       return;
@@ -1212,10 +1340,12 @@ function initCanvasDrag(){
     S.canvasDrag = {
       mode: 'game_pan',
       startX: mx,
+      startY: my,
       initialX: typeof c.crop_x === 'number' ? c.crop_x : 0.5,
+      initialY: typeof c.crop_y === 'number' ? c.crop_y : 0.5,
       moved: false
     };
-    cv.style.cursor = 'ew-resize';
+    cv.style.cursor = 'move';
     e.preventDefault();
   };
 
@@ -1250,9 +1380,12 @@ function initCanvasDrag(){
 
       if(d.mode === 'game_pan'){
         const dx = (mx - d.startX) / W;
+        const dy = (my - d.startY) / H;
         c.crop_x = Math.max(0, Math.min(1, d.initialX - dx * 0.7));
-        const cxInp = $('#cx');
+        c.crop_y = Math.max(0, Math.min(1, (d.initialY ?? 0.5) - dy * 0.7));
+        const cxInp = $('#cx'), cyInp = $('#cy');
         if(cxInp) cxInp.value = c.crop_x;
+        if(cyInp) cyInp.value = c.crop_y;
         applyLayout();
         return;
       }
@@ -1277,7 +1410,7 @@ function initCanvasDrag(){
       } else {
         const _btmHoverCorners = new Set(['bottom','bl','br','bc']);
         const isStreamerHover = !_btmHoverCorners.has(c.cam_pos) ? (my < th) : (my > th);
-        cv.style.cursor = isStreamerHover ? 'grab' : 'ew-resize';
+        cv.style.cursor = isStreamerHover ? 'grab' : 'move';
       }
       return;
     }
@@ -1290,11 +1423,11 @@ function initCanvasDrag(){
       }else{
         inside = mx>=b.x-6 && mx<=b.x+b.w+6 && my>=b.y-6 && my<=b.y+b.h+6;
       }
-      cv.style.cursor = inside ? 'grab' : 'ew-resize';
+      cv.style.cursor = inside ? 'grab' : 'move';
       return;
     }
 
-    cv.style.cursor = 'ew-resize';
+    cv.style.cursor = 'move';
   };
 
   cv.onpointerup=cv.onpointercancel=async e=>{
@@ -1310,7 +1443,7 @@ function initCanvasDrag(){
         await save({ cam_crop_x: S.clip.cam_crop_x, cam_crop_y: S.clip.cam_crop_y });
         toast('Streamer framing adjusted.');
       } else if(d.mode === 'game_pan'){
-        await save({ crop_x: S.clip.crop_x });
+        await save({ crop_x: S.clip.crop_x, crop_y: S.clip.crop_y });
         toast('Gameplay framing adjusted.');
       } else if(d.mode === 'pip_cam'){
         await save({
@@ -1323,6 +1456,43 @@ function initCanvasDrag(){
       }
     }
   };
+
+  // Wheel Zoom on Canvas directly
+  cv.onwheel = guard(async e => {
+    if(!S.clip) return;
+    e.preventDefault();
+    const r = cv.getBoundingClientRect();
+    const my = (e.clientY - r.top) * (cv.height / r.height);
+    const c = S.clip, H = cv.height;
+    const delta = e.deltaY < 0 ? 0.08 : -0.08;
+    if(c.layout === 'stack'){
+      const th = Math.round(H * (c.split_ratio || 0.5));
+      const _btm = new Set(['bottom','bl','br','bc']);
+      const isStreamer = !_btm.has(c.cam_pos) ? (my < th) : (my > th);
+      if(isStreamer){
+        c.cam_zoom = Math.round(Math.max(0.4, Math.min(3.0, (c.cam_zoom || 1.0) + delta)) * 100) / 100;
+        const inp = $('#camZoom'), val = $('#zoomVal');
+        if(inp) inp.value = c.cam_zoom;
+        if(val) val.textContent = Math.round(c.cam_zoom * 100) + '%';
+        applyLayout();
+        await save({ cam_zoom: c.cam_zoom });
+      } else {
+        c.game_zoom = Math.round(Math.max(0.4, Math.min(3.0, (c.game_zoom || 1.0) + delta)) * 100) / 100;
+        const inp = $('#gameZoom'), val = $('#gameZoomVal');
+        if(inp) inp.value = c.game_zoom;
+        if(val) val.textContent = Math.round(c.game_zoom * 100) + '%';
+        applyLayout();
+        await save({ game_zoom: c.game_zoom });
+      }
+    } else {
+      c.game_zoom = Math.round(Math.max(0.4, Math.min(3.0, (c.game_zoom || 1.0) + delta)) * 100) / 100;
+      const inp = $('#gameZoom'), val = $('#gameZoomVal');
+      if(inp) inp.value = c.game_zoom;
+      if(val) val.textContent = Math.round(c.game_zoom * 100) + '%';
+      applyLayout();
+      await save({ game_zoom: c.game_zoom });
+    }
+  });
 }
 
 /* ---------------- PC Audio Upload Handling ---------------- */
@@ -1404,11 +1574,55 @@ function drawBanner(){
   }
   box.hidden=false;
   const cls=st==='dark_box'?'card_dark':(st==='neon'?'card_neon':'card_white');
-  box.innerHTML=`<div class="${cls}">${esc(txt)}</div>`;
+  const bx = typeof c.banner_x === 'number' ? c.banner_x : 0.5;
+  const by = typeof c.banner_y === 'number' ? c.banner_y : 0.12;
+  box.style.left = (bx * 100).toFixed(1) + '%';
+  box.style.top = (by * 100).toFixed(1) + '%';
+  box.innerHTML=`<div class="${cls}"><span class="banner-drag-handle" title="Drag to move anywhere">⋮⋮</span><span>${esc(txt)}</span></div>`;
   if(strip&&txtNode){
     strip.hidden=false;
     txtNode.textContent='🏷️ '+txt;
   }
+}
+
+function initBannerDrag(){
+  const box = $('#bannerBox'), phone = $('#phone');
+  if(!box || !phone) return;
+  box.onpointerdown = e => {
+    if(!S.clip) return;
+    e.preventDefault();
+    box.setPointerCapture(e.pointerId);
+    box.classList.add('dragging');
+    const pr = phone.getBoundingClientRect();
+    const bx = typeof S.clip.banner_x === 'number' ? S.clip.banner_x : 0.5;
+    const by = typeof S.clip.banner_y === 'number' ? S.clip.banner_y : 0.12;
+    const startClientX = e.clientX, startClientY = e.clientY;
+    let moved = false;
+
+    box.onpointermove = ev => {
+      ev.preventDefault();
+      moved = true;
+      const dx = (ev.clientX - startClientX) / pr.width;
+      const dy = (ev.clientY - startClientY) / pr.height;
+      const nx = Math.max(0.08, Math.min(0.92, bx + dx));
+      const ny = Math.max(0.06, Math.min(0.94, by + dy));
+      S.clip.banner_x = Math.round(nx * 1000) / 1000;
+      S.clip.banner_y = Math.round(ny * 1000) / 1000;
+      box.style.left = (S.clip.banner_x * 100).toFixed(1) + '%';
+      box.style.top = (S.clip.banner_y * 100).toFixed(1) + '%';
+    };
+
+    box.onpointerup = box.onpointercancel = async ev => {
+      box.classList.remove('dragging');
+      box.onpointermove = null;
+      box.onpointerup = null;
+      box.onpointercancel = null;
+      if(moved){
+        await save({ banner_x: S.clip.banner_x, banner_y: S.clip.banner_y });
+        toast('Title card moved.');
+      }
+    };
+  };
 }
 function markSeg(){
   const c=S.clip;if(!c)return;
@@ -1710,11 +1924,22 @@ function drawStack(v,f,c){
   const gameY = isStreamerBottom ? 0 : th;
   const dividerY = th;
 
-  // 1. Gameplay Screen
+  // 1. Gameplay Screen with game_zoom and crop_x, crop_y
+  const gameZoom = Math.max(0.4, Math.min(3.0, c.game_zoom || 1.0));
   const gameAspect = W / gameH;
-  const gw = Math.min(vw, vh * gameAspect);
-  const gx = Math.max(0, Math.min(vw - gw, (vw - gw) * (c.crop_x ?? 0.5)));
-  g.drawImage(v, gx, 0, gw, vh, 0, gameY, W, gameH);
+  let ggw, ggh;
+  if(vw / vh > gameAspect){
+    ggh = Math.min(vh, vh / gameZoom);
+    ggw = Math.min(vw, ggh * gameAspect);
+  } else {
+    ggw = Math.min(vw, vw / gameZoom);
+    ggh = Math.min(vh, ggw / gameAspect);
+  }
+  const panGx = typeof c.crop_x === 'number' ? c.crop_x : 0.5;
+  const panGy = typeof c.crop_y === 'number' ? c.crop_y : 0.5;
+  const gx = Math.max(0, Math.min(vw - ggw, (vw - ggw) * panGx));
+  const gy = Math.max(0, Math.min(vh - ggh, (vh - ggh) * panGy));
+  g.drawImage(v, gx, gy, ggw, ggh, 0, gameY, W, gameH);
 
   // 2. Streamer Reaction Camera
   const topAspect = W / streamH;
@@ -1780,21 +2005,59 @@ function applyLayout(){
   }
   v.style.objectFit=(c.layout==='blur')?'contain':'cover';
   let x=.5;if(c.layout==='crop')x=c.crop_x;else if(c.layout==='follow'){const p=posAt(v.currentTime-c.start);x=p==null?.5:p}
-  v.style.objectPosition=(x*100)+'% 50%';
+  let y = typeof c.crop_y === 'number' ? c.crop_y : 0.5;
+  v.style.objectPosition=(x*100)+'% '+(y*100)+'%';
 }
 function sizePhone(){const p=$('#phone'),w=$('#editor').clientWidth;if(p)p.style.setProperty('--w',(w>260?Math.min(236,w-80):236)+'px')}
-function playClip(){const v=$('#pv');if(!v.paused){v.pause();return}if(v.currentTime<S.clip.start||v.currentTime>=S.clip.end-.05)v.currentTime=S.clip.start;v.play()}
-function onTime(){const v=$('#pv');if(!v||!S.clip)return;drawPh();if(v.currentTime>=S.clip.end){if($('#loop').checked){v.currentTime=S.clip.start}else v.pause()}drawCaption();applyLayout();}
+function playClip(){
+  const v=$('#pv');if(!v||!S.clip)return;
+  const c = S.clip;
+  const isCut = (v.duration && v.duration <= (c.end - c.start) + 2.5);
+  const startLimit = isCut ? 0 : c.start;
+  const endLimit = isCut ? (c.end - c.start) : c.end;
+  if(!v.paused){v.pause();return}
+  if(v.currentTime < startLimit || v.currentTime >= endLimit - 0.05) v.currentTime = startLimit;
+  v.play();
+}
+function onTime(){
+  const v=$('#pv');if(!v||!S.clip)return;
+  drawPh();
+  const c = S.clip;
+  const isCut = (v.duration && v.duration <= (c.end - c.start) + 2.5);
+  const endLimit = isCut ? (c.end - c.start) : c.end;
+  const startLimit = isCut ? 0 : c.start;
+  if(v.currentTime >= endLimit){
+    if($('#loop').checked){v.currentTime = startLimit} else v.pause();
+  }
+  drawCaption();
+  applyLayout();
+}
 function drawCaption(){
   const v=$('#pv'),cap=$('#cap'),c=S.clip;if(!v||!cap||!c)return;
   const t=S.tpl[c.template];if(!t||!c.captions){cap.innerHTML='';return}
-  const rel=v.currentTime-c.start,cue=S.cues.find(q=>rel>=q.start-.001&&rel<q.end);
+  if((!S.cues || !S.cues.length) && c.captions){
+    if(!S._loadingCues && S.cid){
+      S._loadingCues = true;
+      loadCues().then(()=>{ S._loadingCues = false; drawCaption(); drawCues(); }).catch(()=>{ S._loadingCues = false; });
+    }
+  }
+  let rel = v.currentTime;
+  const isFull = (v.duration && v.duration > (c.end - c.start) + 2.5) || rel >= c.start - 0.5;
+  if(isFull) rel = rel - c.start;
+  rel = Math.max(0, rel);
+
+  const cue = (S.cues || []).find(q => rel >= (q.start - 0.05) && rel < (q.end + 0.05));
   if(!cue){cap.innerHTML='';return}
-  let act=0;cue.words.forEach((w,i)=>{if(rel>=w.start-.001)act=i});
+  let act=0;
+  (cue.words || []).forEach((w,i)=>{if(rel >= (w.start - 0.02)) act=i});
   const W=$('#phone').clientWidth,k=W/1080;
-  const words=t.mode==='word'?[[cue.words[act],act]]:cue.words.map((w,i)=>[w,i]);
-  const html=words.map(([w,i])=>{const on=i===act;const sc=t.scale_active&&on?`transform:scale(${t.scale_active/100});`:'';
-    return `<span style="color:${on?t.active:t.primary};${sc}">${esc(t.upper?w.w.toUpperCase():w.w)}</span>`}).join(' ');
+  const words=t.mode==='word'?[[(cue.words || [])[act] || {w:''},act]]:(cue.words || []).map((w,i)=>[w,i]);
+  const html=words.map(([w,i])=>{
+    if(!w) return '';
+    const on=i===act;
+    const sc=t.scale_active&&on?`transform:scale(${t.scale_active/100});`:'';
+    return `<span style="color:${on?t.active:t.primary};${sc}">${esc(t.upper?w.w.toUpperCase():w.w)}</span>`;
+  }).join(' ');
   cap.style.cssText=`bottom:${(t.mv/1920*100).toFixed(1)}%;font:${t.bold?800:400} ${(t.size*k).toFixed(1)}px/1.15 Arial,Helvetica,sans-serif;text-shadow:${t.box?'none':tplShadow(t,k)}${t.glow?',0 0 '+(10*k*4).toFixed(0)+'px '+t.outline:''}`;
   cap.innerHTML=t.box?`<span style="background:#000b;padding:.1em .35em;border-radius:4px">${html}</span>`:html;
 }

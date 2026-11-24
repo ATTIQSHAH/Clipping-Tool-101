@@ -18,7 +18,7 @@ class TestFeatures(unittest.TestCase):
         )
         self.assertIn("Style: Banner", ass_content)
         self.assertIn("Peak stream", ass_content)
-        self.assertIn("{\\an8}", ass_content)
+        self.assertTrue("{\\an5\\pos(" in ass_content or "{\\an8}" in ass_content)
 
         # Test dark card banner
         ass_dark = to_ass(
@@ -40,7 +40,7 @@ class TestFeatures(unittest.TestCase):
     def test_db_columns(self):
         c = db.conn()
         cols = [r[1] for r in c.execute("PRAGMA table_info(clips)").fetchall()]
-        for expected in ["cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style"]:
+        for expected in ["cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style", "game_zoom", "crop_y", "banner_x", "banner_y"]:
             self.assertIn(expected, cols, f"Column {expected} missing from clips table")
         c.close()
 

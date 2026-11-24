@@ -38,7 +38,28 @@ def test_render_dual_cam():
     assert "[top][bot]vstack" in fc
     print("Render dual cam graph test: OK")
 
+def test_render_dual_cam_zoom():
+    class DummyJob:
+        def __init__(self):
+            self.cmd = None
+        def run(self, cmd, cwd=None):
+            self.cmd = cmd
+
+    job = DummyJob()
+    info = {"w": 1280, "h": 720, "duration": 10.0}
+    render_clip(job, "ffmpeg", "source.mp4", info, 0.0, 5.0, "sub.ass", "out.mp4",
+                layout="stack", crop_x=0.6, crop_y=0.4, res=1080, split_ratio=0.5, cam_corner="tr",
+                cam_zoom=1.5, game_zoom=1.8, music=None, sfx=())
+
+    cmd_str = " ".join(job.cmd)
+    fc_idx = job.cmd.index("-filter_complex") + 1
+    fc = job.cmd[fc_idx]
+    assert "vstack" in fc
+    assert "unsharp" in fc
+    print("Dual cam zoom & pan test: OK")
+
 if __name__ == "__main__":
     test_dual_cam_framing()
     test_render_dual_cam()
+    test_render_dual_cam_zoom()
     print("ALL DUAL CAM TESTS PASSED!")

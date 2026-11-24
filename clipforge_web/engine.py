@@ -369,7 +369,10 @@ def ensure_clip_words(clip, video=None):
         work = wdir(vid_id)
         start, dur = s, max(0.5, e - s)
         clip_wav = os.path.join(work, f"clip_{cid}_speech.wav")
-        cmd = [ffmpeg, "-y", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", src,
+        vpath = video.get("path") if isinstance(video, dict) else None
+        is_full = bool(vpath and os.path.exists(vpath) and os.path.abspath(src) == os.path.abspath(vpath))
+        ss_val = start if is_full else 0.0
+        cmd = [ffmpeg, "-y", "-ss", f"{ss_val:.3f}", "-t", f"{dur:.3f}", "-i", src,
                "-vn", "-ac", "1", "-ar", "16000", clip_wav]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         tr = transcribe_file(clip_wav, model="base")
@@ -447,22 +450,6 @@ def clip_cues(clip):
     words_list = title.split()
     if not words_list:
         words_list = ["WATCH", "THIS", "MOMENT", "🔥"]
-
-    chunk_size = 3
-    chunks = [words_list[i:i + chunk_size] for i in range(0, len(words_list), chunk_size)]
-    chunk_dur = min(2.5, dur / max(len(chunks), 1))
-    cues = []
-    for idx, ch in enumerate(chunks):
-        c_start = idx * chunk_dur
-        c_end = min(dur, c_start + chunk_dur)
-        w_dur = (c_end - c_start) / max(len(ch), 1)
-        c_words = []
-        for j, wrd in enumerate(ch):
-            ws = c_start + j * w_dur
-            we = ws + w_dur
-            c_words.append({"w": wrd, "start": ws, "end": we, "i": idx * 10 + j})
-        cues.append({"words": c_words, "start": c_start, "end": c_end, "text": " ".join(ch)})
-    return cues
 
     chunk_size = 3
     chunks = [words_list[i:i + chunk_size] for i in range(0, len(words_list), chunk_size)]
@@ -685,6 +672,8 @@ def render(job, clip_id, p):
     hook_zoom = bool(c["hook_zoom"]) if ("hook_zoom" in c and c["hook_zoom"] is not None) else True
     banner_text = c.get("banner_text") or ""
     banner_style = c.get("banner_style") or "white_box"
+    banner_x = float(c.get("banner_x") if c.get("banner_x") is not None else 0.5)
+    banner_y = float(c.get("banner_y") if c.get("banner_y") is not None else 0.12)
 
     res_base = int(c["res"] or 1080)
     aspect = str(c.get("aspect_ratio") or "9:16").strip()
@@ -699,7 +688,7 @@ def render(job, clip_id, p):
 
     with open(ass, "w", encoding="utf-8") as f:
         f.write(captions.to_ass(cues, c["template"], width=W, height=H, censor=censor, emojis=emojis, hook_boost=True,
-                                banner_text=banner_text, banner_style=banner_style))
+                                banner_text=banner_text, banner_style=banner_style, banner_x=banner_x, banner_y=banner_y))
     out_dir = os.path.join(db.DATA, "exports")
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"clip_{clip_id}.mp4")
@@ -727,6 +716,10 @@ def render(job, clip_id, p):
     src, start, end = clip_source(c, v), c["start"], c["end"]
     if v["hd"] and not c["src"]:
         src, start, end, info, track = _hd_part(job, c, v, info, track) or (src, start, end, info, track)
+    elif src and src != (v.get("path") if isinstance(v, dict) else None):
+        # src is already cut to this clip (starts at 0.0)
+        start = 0.0
+        end = c["end"] - c["start"]
     setp(0.12)
     dur = c["end"] - c["start"]
     sfx = []
@@ -757,7 +750,9 @@ def render(job, clip_id, p):
                 cam_crop_x=float(c.get("cam_crop_x") if c.get("cam_crop_x") is not None else 0.5),
                 cam_crop_y=float(c.get("cam_crop_y") if c.get("cam_crop_y") is not None else 0.5),
                 cam_corner=c.get("cam_corner") or "tr",
-                aspect_ratio=aspect)
+                aspect_ratio=aspect,
+                game_zoom=float(c.get("game_zoom") or 1.0),
+                crop_y=float(c.get("crop_y") if c.get("crop_y") is not None else 0.5))
     db.ex("update clips set render_status='done', render_progress=100, render_path=?, qc=? where id=?",
           (out, db.dumps(quality_check(ffmpeg, out, clip_words(c))), clip_id))
 
