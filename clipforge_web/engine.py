@@ -2,7 +2,7 @@
 import functools, json, os, re, subprocess
 import numpy as np
 
-from clipforge import ai, analyze, audiolib, captions, faces
+from clipforge import ai, analyze, audiolib, captions, faces, game
 from clipforge.render import RES, render_clip
 from clipforge.segments import HOOK_WORDS, snap, text_score, title_of
 from clipforge.source import download, download_section, youtube_chat
@@ -116,8 +116,14 @@ def _reasons(peak, comp, words, hooks, wps, q_first, ai_info):
         r.append("AI editor: " + ai_info["reason"])
     if comp["audio"] >= 0.15:
         r.append(f"Loudness peak at {_mmss(peak)}: {comp['audio']:.0%} of the loudest moment in this video.")
-    if comp.get("motion") is not None and comp["motion"] >= 0.3:
+    if comp.get("action") == "chase":
+        r.append("Looks like a chase: the picture keeps moving fast for a long stretch.")
+    elif comp.get("action") == "crash":
+        r.append("Looks like a crash or explosion: a sudden jolt on screen with a loud bang.")
+    elif comp.get("motion") is not None and comp["motion"] >= 0.3:
         r.append(f"Big on-screen action here: {comp['motion']:.0%} of the wildest moment.")
+    if comp.get("game"):
+        r.append(f"On screen: {comp['game']}. A big game moment.")
     if comp["heat"] is not None:
         r.append(f"YouTube 'most replayed' signal here: {comp['heat']:.0%}.")
     if comp["chat"] is not None:
@@ -199,7 +205,20 @@ def analyze_video(job, video_id, p):
         motion = analyze.motion_score(ffmpeg, src, len(a))
         if motion is not None:
             np.save(mcache, motion)
-    score = analyze.combine(a, heat, chat, motion)
+    gcache = os.path.join(work, "game_events.json")
+    if os.path.exists(gcache):
+        with open(gcache) as f:
+            events = [tuple(e) for e in json.load(f)]
+    else:
+        prog(video_id, 18, "Looking for game banners (WASTED, BUSTED...)")
+        events = game.banners(ffmpeg, src, check=job.check)
+        if game.available():
+            with open(gcache, "w") as f:
+                json.dump(events, f)
+        job.log(f"Game banners: {len(events)} found." if game.available() else
+                "Game banners skipped (install requirements-vision.txt to turn them on).")
+    gscore = game.banner_score(events, len(a), analyze.FRAME)
+    score = analyze.combine(a, heat, chat, motion, gscore)
     k = max(1, len(score) // 400)
     curve = [round(float(score[i:i + k].max()), 3) for i in range(0, len(score), k)]
     db.ex("update videos set curve=? where id=?", (db.dumps({"step": k * analyze.FRAME, "v": curve}), video_id))
@@ -274,6 +293,8 @@ def analyze_video(job, video_id, p):
         comp = {"audio": float(a[idx]), "heat": None if heat is None else float(heat[idx]),
                 "motion": None if motion is None else float(motion[idx]),
                 "chat": None if chat is None else float(chat[idx]), "speech": float(c["text"]),
+                "action": analyze.action_kind(motion, a, int(c["s"] / analyze.FRAME), int(c["e"] / analyze.FRAME)),
+                "game": next((lab for t, lab in events if c["s"] - 3 <= t <= c["e"]), None),
                 "ai": c["ai"]["score"] if c["ai"] else None}
         txt = " ".join(w["w"] for w in c["cw"]).lower()
         hooks = [h for h in HOOK_WORDS if h in txt]

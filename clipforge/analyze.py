@@ -110,8 +110,24 @@ def motion_score(ffmpeg, src, n_frames):
     return np.pad(per_frame, (0, max(0, n_frames - len(per_frame))))
 
 
-def combine(audio, heat, chat, motion=None):
+def action_kind(motion, audio, s, e):
+    """What the on-screen action between frames s and e looks like: 'chase' (long run of motion), 'crash'
+    (one big jolt with a loud bang), or None."""
+    if motion is None or e <= s:
+        return None
+    m, a = motion[s:e], audio[s:e]
+    if (m > 0.4).mean() > 0.4:
+        return "chase"
+    i = int(m.argmax())
+    if m[i] > 0.7 and a[max(0, i - 4):i + 6].max(initial=0) > 0.5:
+        return "crash"
+    return None
+
+
+def combine(audio, heat, chat, motion=None, game=None):
     parts = [(audio, 0.5)]
+    if game is not None:
+        parts.append((game, 0.25))
     if motion is not None:
         parts.append((motion, 0.15))
     if heat is not None:
