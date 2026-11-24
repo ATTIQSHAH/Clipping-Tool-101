@@ -80,7 +80,7 @@ def parse_live_chat(path):
 
 
 def live_chat_line(line):
-    """One line of a live_chat.json being written during a stream -> [(unix time, message)]."""
+    """One line of a live_chat.json being written during a stream -> [(unix time, message, author)]."""
     try:
         acts = json.loads(line)["replayChatItemAction"]["actions"]
     except (KeyError, ValueError, TypeError):
@@ -89,5 +89,6 @@ def live_chat_line(line):
     for a in acts:
         r = a.get("addChatItemAction", {}).get("item", {}).get("liveChatTextMessageRenderer")
         if r and r.get("timestampUsec"):
-            out.append((int(r["timestampUsec"]) / 1e6, "".join(x.get("text", "") for x in r.get("message", {}).get("runs", []))))
+            out.append((int(r["timestampUsec"]) / 1e6, "".join(x.get("text", "") for x in r.get("message", {}).get("runs", [])),
+                        r.get("authorName", {}).get("simpleText")))
     return out

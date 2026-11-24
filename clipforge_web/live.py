@@ -79,7 +79,7 @@ class TwitchChat(threading.Thread):
                             continue
                         msg = parse_irc_line(line)
                         if msg is not None:
-                            self.events.append((time.time(), msg))
+                            self.events.append((time.time(), msg, line.split("!", 1)[0].lstrip(":")))
             except Exception as e:
                 self.error = f"Chat connection lost ({str(e)[:60]}). Retrying."
             self.connected = False
@@ -142,11 +142,11 @@ class YouTubeChat(threading.Thread):
 
 
 def kick_msg(frame):
-    """Pusher frame (dict) -> message text for a Kick ChatMessageEvent, else None."""
+    """Pusher frame (dict) -> (message, sender) for a Kick ChatMessageEvent, else None."""
     if "ChatMessageEvent" not in frame.get("event", ""):
         return None
     d = json.loads(frame["data"]) if isinstance(frame.get("data"), str) else frame.get("data") or {}
-    return d.get("content")
+    return d.get("content"), (d.get("sender") or {}).get("username")
 
 
 def _kick_get(url, body=None):
@@ -189,7 +189,7 @@ class KickChat(threading.Thread):
                     if f.get("event") == "pusher:ping":
                         self.ws.send(json.dumps({"event": "pusher:pong", "data": {}}))
                     elif (m := kick_msg(f)) is not None:
-                        self.events.append((time.time(), m))
+                        self.events.append((time.time(), *m))
             except Exception as e:
                 self.error = f"Chat connection lost ({str(e)[:60]}). Retrying."
             self.connected = False
@@ -247,7 +247,7 @@ class Live:
         self.db = []                                       # loudness per 0.5 s frame
         self.rate_x = []                                   # chat activity per second
         self.hist = []                                     # per second: (audio, chat, combined)
-        self.chat_total, self.t0 = 0, None
+        self.chat_total, self.t0, self.chatters = 0, None, {}
         self.pending, self.moments, self.last_peak = queue.Queue(), 0, -999.0
         self.active = None
         self.procs, self.attempt, self.last_new = [], 0, time.time()
@@ -398,10 +398,15 @@ class Live:
             if self.t0 is None:
                 continue
             # chat: bucket the new messages by stream second
-            for wall, txt in self.chat.drain():
+            for ev in self.chat.drain():
+                wall, txt, nick = ev[0], ev[1], (ev[2] if len(ev) > 2 else None)
                 sec = int(wall - self.t0)
                 if sec < 0 or txt.startswith("!") or "http" in txt:   # bot commands and link ads are not a reaction
                     continue
+                if nick:                                       # count people, not messages: a spammer counts once per 10 s
+                    if sec - self.chatters.get(nick, -99) < 10:
+                        continue
+                    self.chatters[nick] = sec
                 while len(self.rate_x) <= sec:
                     self.rate_x.append(0.0)
                 self.rate_x[sec] += 1.0 + (1.5 if any(k in txt.lower() for k in analyze.CHAT_HYPE) else 0.0)
