@@ -1,5 +1,5 @@
 """The work behind the buttons: import a video, find clips, frame them on the face, render."""
-import json, os, re, subprocess
+import functools, json, os, re, subprocess
 import numpy as np
 
 from clipforge import ai, analyze, audiolib, captions, faces
@@ -504,18 +504,29 @@ def qc_from_log(log, dur, words):
     return out
 
 
-def post_text(c, v):
-    """Ready-to-paste post: title, credit to the streamer and hashtags."""
-    info = {}
-    if v.get("info_path") and os.path.exists(v["info_path"]):
-        with open(v["info_path"], encoding="utf-8") as f:
-            info = json.load(f)
+@functools.lru_cache(maxsize=512)
+def _uploader(info_path, mtime):
+    with open(info_path, encoding="utf-8") as f:
+        info = json.load(f)
+    return info.get("channel") or info.get("uploader")
+
+
+def credit(v):
+    """(streamer name or None, platform name or '') for a video, from its link and download info."""
     src = v.get("source") or ""
     plat = next((n for k, n in (("twitch.tv", "Twitch"), ("kick.com", "Kick"), ("youtu", "YouTube")) if k in src), "")
-    who = info.get("channel") or info.get("uploader")
+    who = None
+    if v.get("info_path") and os.path.exists(v["info_path"]):
+        who = _uploader(v["info_path"], os.path.getmtime(v["info_path"]))
     m = re.search(r"(?:twitch\.tv|kick\.com)/([A-Za-z0-9_]+)|youtube\.com/@([\w.-]+)", src)
     if not who and m and (m.group(1) or "").lower() != "videos":
         who = m.group(1) or m.group(2)
+    return who, plat
+
+
+def post_text(c, v):
+    """Ready-to-paste post: title, credit to the streamer and hashtags."""
+    who, plat = credit(v)
     tag = re.sub(r"[^A-Za-z0-9]", "", who or "")
     tags = ["#GTA6", "#GTA", "#Shorts"] + ([f"#{tag}"] if tag else []) + ([f"#{plat}"] if plat else [])
     return "\n\n".join(x for x in (c["title"], f"Credit: {who}" + (f" on {plat}" if plat else "") if who else "",

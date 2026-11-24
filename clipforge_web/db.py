@@ -23,6 +23,7 @@ create table if not exists jobs(
   id integer primary key, type text, ref_id integer, params text, status text,
   log text default '', error text, created real, started real, finished real);
 create table if not exists settings(key text primary key, value text);
+create table if not exists rules(key text primary key, status text, note text);
 """
 
 MIGRATE = {

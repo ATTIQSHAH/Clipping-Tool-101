@@ -214,6 +214,11 @@ def _video_out(v):
     o["curve"] = json.loads(v["curve"]) if v["curve"] else None
     o["cam_box"] = json.loads(v["cam_box"]) if v.get("cam_box") else None
     o["has_file"] = bool(v["path"])
+    who, plat = engine.credit(v)
+    if who:
+        key = f"{plat}:{who}".lower()
+        r = db.q("select status, note from rules where key=?", (key,), one=True) or {"status": "unknown", "note": ""}
+        o["streamer"] = {"name": who, "platform": plat, "key": key, **r}
     return o
 
 
@@ -554,10 +559,28 @@ def patch_cue(cid: int, body: dict = Body(...)):
     return cues(cid)
 
 
+RULES = ("allowed", "tips", "no", "unknown")
+
+
+@app.put("/api/rules")
+def set_rule(body: dict = Body(...)):
+    """What a streamer says about clipping their streams: allowed, tips (allowed with conditions), no, unknown."""
+    key, status, note = str(body.get("key") or "").strip().lower(), body.get("status"), str(body.get("note") or "")[:1000]
+    if not key or status not in RULES:
+        raise HTTPException(400, "Pick one of: allowed, tips, no, unknown.")
+    db.ex("insert into rules(key,status,note) values(?,?,?) on conflict(key) do update set status=excluded.status, "
+          "note=excluded.note", (key, status, note))
+    return {"key": key, "status": status, "note": note}
+
+
 @app.post("/api/clips/{cid}/approve")
-def approve(cid: int):
-    """Approve = keep it. If it isn't rendered yet it gets made now; the page downloads it when it's ready."""
+def approve(cid: int, body: Optional[dict] = Body(None)):
+    """Approve = keep it. If it isn't rendered yet it gets made now; the page downloads it when it's ready.
+    A streamer marked 'no clipping' needs {"permission": true}: you confirm you have their OK."""
     c = _clip(cid)
+    s = _video_out(_video(c["video_id"])).get("streamer")
+    if s and s["status"] == "no" and not (body or {}).get("permission"):
+        raise HTTPException(409, f"{s['name']} doesn't allow clipping. Only go on if you have their permission.")
     db.ex("update clips set status='approved', downloaded=0 where id=?", (cid,))
     fresh = c["render_status"] == "done" and c["render_path"] and os.path.exists(c["render_path"])
     if not fresh and c["render_status"] not in ("queued", "running"):

@@ -260,7 +260,7 @@ function updateMain(){
   if(st==='busy'){swapText($('#stage'),v.stage||'Working');$('#pct').textContent=Math.round(v.progress);$('#pbar').style.width=Math.max(3,v.progress)+'%';$('#vtitle').textContent=v.title||''}
   if(st==='error'&&$('#errmsg'))$('#errmsg').textContent=v.error||'Something went wrong.';
   if(st==='ready'||st==='live'){
-    $('#vhead').innerHTML=`<h1 style="font-size:23px;letter-spacing:-.01em">${esc(v.title)}</h1><div class="muted small" style="margin-top:3px">${metaLine(v)}${v.kind==='live'&&st==='ready'?' · recording finished':''}</div>
+    $('#vhead').innerHTML=`<h1 style="font-size:23px;letter-spacing:-.01em">${esc(v.title)}</h1><div class="muted small" style="margin-top:3px">${metaLine(v)}${v.kind==='live'&&st==='ready'?' · recording finished':''}${ruleBadge(v)}</div>
       ${v.error?`<p style="color:var(--low);margin:8px 0 0" class="small">${esc(v.error)}</p>`:''}`;
     $('#clipcount').textContent=S.clips.length?`${S.clips.length} clip${S.clips.length>1?'s':''}, best first`:(st==='live'?'Clips appear here as moments happen':'No clips yet');
     drawMap();drawCands();
@@ -315,8 +315,28 @@ async function loadClips(){
     if(S.autoDl.has(k.id)&&k.render_status==='failed'){S.autoDl.delete(k.id);toast('That clip could not be made: '+(k.render_error||'unknown error'),true)}});
 }
 function startDownload(id){const a=document.createElement('a');a.href='/api/clips/'+id+'/download';a.download='';document.body.appendChild(a);a.click();a.remove()}
+const RULE={allowed:['Clipping allowed','ok'],tips:['Has clip tips','busy'],no:['No clipping','err'],unknown:['Rules unknown','']};
+function ruleBadge(v){const s=v.streamer;if(!s)return '';const[t,c]=RULE[s.status]||RULE.unknown;
+  return ` · ${esc(s.name)} <button class="pill ${c}" style="cursor:pointer" onclick="ruleEditor()" title="${esc(s.note||'What does this streamer say about clipping? Click to set it.')}">${t}</button>`}
+function ruleEditor(){
+  const s=S.video&&S.video.streamer;if(!s)return;
+  const m=document.createElement('div');m.className='modal';
+  m.innerHTML=`<div class="mbox stack" style="width:440px"><h2>Clip rules: ${esc(s.name)}</h2>
+    <p class="muted small" style="margin:0">What does this streamer say about people clipping their streams? Check their channel's About page or panels.</p>
+    <div class="seg" id="rst">${Object.entries(RULE).map(([k,[t]])=>`<button data-k="${k}" class="${k===s.status?'on':''}">${t}</button>`).join('')}</div>
+    <div><label for="rnote">Notes or link to their rules</label><textarea id="rnote" rows="3">${esc(s.note||'')}</textarea></div>
+    <div class="row"><button id="rNo" class="ghost">Cancel</button><button id="rOk" class="primary">Save</button></div></div>`;
+  document.body.appendChild(m);let st=s.status;
+  m.querySelectorAll('#rst button').forEach(b=>b.onclick=()=>{st=b.dataset.k;m.querySelectorAll('#rst button').forEach(x=>x.classList.toggle('on',x===b))});
+  m.querySelector('#rNo').onclick=()=>m.remove();m.onkeydown=e=>{if(e.key==='Escape')m.remove()};
+  m.querySelector('#rOk').onclick=guard(async()=>{await send('PUT','/api/rules',{key:s.key,status:st,note:m.querySelector('#rnote').value});
+    m.remove();S.videos=await api('/api/videos');S.video=S.videos.find(x=>x.id===S.vid)||S.video;S.mstate='';updateMain();toast('Clip rules saved for '+s.name+'.')});
+  m.querySelector('#rOk').focus();
+}
 async function approve(id,quiet){
-  const r=await send('POST','/api/clips/'+id+'/approve');
+  const s=S.video&&S.video.streamer;let body;
+  if(s&&s.status==='no'){if(S.permOk!==S.vid&&!confirm(s.name+" doesn't allow clipping. Only go on if you have their permission. Do you?"))return;S.permOk=S.vid;body={permission:true}}
+  const r=await send('POST','/api/clips/'+id+'/approve',body);
   if(r.needs_render){S.autoDl.add(id);if(!quiet)toast('Preparing your clip. It downloads when it is ready.')}
   else{startDownload(id);if(!quiet)toast('Saved to your Downloads folder.')}
   Object.assign(S.clip&&S.clip.id===id?S.clip:{},r.clip);await loadClips();updateMain();
