@@ -37,6 +37,8 @@ A yellow bar at the top tells you if something is missing.
 ## Good to know
 - Platforms have no "likes" on live streams. ClipForge uses chat bursts (Twitch), crowd/streamer volume and
   reaction words ("clip that", "no way") instead. If a stream drops or freezes (Kick does this), recording reconnects by itself.
+- Optional GTA banner reading (WASTED, BUSTED, MISSION FAILED boost a moment; chases and crashes are labelled):
+  pip install --no-deps -r requirements-vision.txt. Adds about 1 minute per hour of video.
 - Kick video needs Chrome or Edge installed (Streamlink opens it briefly to get the stream).
 - Only clip streams/videos you have the right to use.
 - 2K/4K rendering is slow on a laptop. Clips are only made when you approve them, so nothing is wasted.
@@ -51,4 +53,4 @@ server with a domain (Caddy gives HTTPS). Live Kick clipping needs a desktop bro
 Set CLIPFORGE_DEVICE=cuda to transcribe on an NVIDIA GPU (much faster when several streams run at once).
 
 ## Tests
-python tests/test_live_watch.py (needs FFmpeg, no internet).
+python tests/test_live_watch.py (needs FFmpeg, no internet). python tests/test_game.py for banner reading.
