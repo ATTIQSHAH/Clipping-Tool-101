@@ -57,6 +57,18 @@ def build_cues(words, max_words=3, max_chars=22, gap=0.35):
     return cues
 
 
+def respread(cue, text):
+    """The same cue with new text (a translation): words spread over the cue's time by their length."""
+    toks = text.split() or ["…"]
+    t0, t1 = cue["start"], cue["end"]
+    total, cur, words = sum(len(t) + 1 for t in toks), t0, []
+    for t in toks:
+        d = (t1 - t0) * (len(t) + 1) / total
+        words.append({"w": t, "start": round(cur, 3), "end": round(cur + d, 3)})
+        cur += d
+    return {"start": t0, "end": t1, "words": words}
+
+
 def _ts(t):
     t = max(0.0, t)
     cs = int(round(t * 100))

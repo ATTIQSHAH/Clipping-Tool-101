@@ -27,7 +27,7 @@ if errorlevel 1 (
 echo Installing ClipForge packages...
 "%PYEXE%" %PYARG% -m pip install -r requirements.txt
 if errorlevel 1 ( echo Package install failed. & pause & exit /b 1 )
-"%PYEXE%" %PYARG% -m pip install --no-deps -r requirements-vision.txt || echo Optional banner reading not installed, ClipForge still works.
+"%PYEXE%" %PYARG% -m pip install --no-deps -r requirements-extras.txt || echo Optional banner reading not installed, ClipForge still works.
 powershell -NoProfile -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\ClipForge.lnk');$s.TargetPath='%~dp0run_web.bat';$s.WorkingDirectory='%~dp0';$s.Save()"
 echo.
 echo Done. Use the ClipForge shortcut on your Desktop (or run_web.bat) to start the app.

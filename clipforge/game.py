@@ -1,6 +1,6 @@
 """Big on-screen game banners: WASTED, BUSTED, MISSION PASSED... read with OCR from the middle of the screen every few
 seconds. Optional: needs rapidocr-onnxruntime
-(pip install -r requirements-vision.txt); without it this finds nothing and analysis goes on as before."""
+(pip install -r requirements-extras.txt); without it this finds nothing and analysis goes on as before."""
 import difflib, re, subprocess
 import numpy as np
 

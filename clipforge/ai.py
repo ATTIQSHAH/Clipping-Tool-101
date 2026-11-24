@@ -127,3 +127,29 @@ def rule_edit(ask, state):
             out["res"] = r
             break
     return out
+
+
+# ---------------- translated captions / voice-over ----------------
+LANGS = {"es": "Spanish", "pt": "Portuguese (Brazil)", "fr": "French", "de": "German", "it": "Italian",
+         "hi": "Hindi", "ar": "Arabic", "ru": "Russian", "tr": "Turkish", "en": "English"}
+TRANSLATE_PROMPT = """Translate each line into {lang} for the captions of a short gaming video.
+Keep the energy and slang natural for young viewers. Keep names, game words (GTA, WASTED, BUSTED) and numbers as they are.
+Reply with a JSON array of exactly {n} strings, one per line, in the same order.
+
+{lines}"""
+
+
+def translate(api_key, lines, lang, post=_post):
+    """Translate caption lines. Returns a list of the same length. Raises on errors or a wrong-length reply."""
+    if not lines:
+        return []
+    listing = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(lines))
+    resp = post(api_key, {"model": MODEL, "max_tokens": 4000, "system": "Reply with JSON only, no prose and no code fences.",
+                          "messages": [{"role": "user", "content": TRANSLATE_PROMPT.format(
+                              lang=LANGS.get(lang, lang), n=len(lines), lines=listing)}]})
+    text = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+    a, b = text.find("["), text.rfind("]")
+    out = json.loads(text[a:b + 1]) if 0 <= a < b else None
+    if not isinstance(out, list) or len(out) != len(lines):
+        raise ValueError("the translation came back with the wrong number of lines")
+    return [str(x).strip() or lines[i] for i, x in enumerate(out)]

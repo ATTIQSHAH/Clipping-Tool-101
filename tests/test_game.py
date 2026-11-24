@@ -1,5 +1,5 @@
 """Game banner finding. Run from the project folder: python tests/test_game.py
-Needs FFmpeg. The OCR part runs only when rapidocr-onnxruntime is installed (requirements-vision.txt)."""
+Needs FFmpeg. The OCR part runs only when rapidocr-onnxruntime is installed (requirements-extras.txt)."""
 import glob, os, subprocess, sys, tempfile
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
