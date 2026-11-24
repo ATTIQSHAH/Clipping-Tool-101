@@ -90,6 +90,11 @@ def _video(vid: int):
     v = db.q("select * from videos where id=?", (vid,), one=True)
     if not v:
         raise HTTPException(404, "Video not found.")
+    who, plat = engine.credit(v)
+    if who:
+        key = f"{plat}:{who}".lower()
+        rule = db.q("select status, note from rules where key=?", (key,), one=True) or {"status": "unknown", "note": ""}
+        v["streamer"] = {"name": who, "platform": plat, "key": key, **rule}
     return v
 
 
@@ -105,6 +110,7 @@ def _clip_out(c):
     o["scores"] = json.loads(c["scores"] or "{}")
     o["reasons"] = json.loads(c["reasons"] or "[]")
     o["sfx"] = json.loads(c["sfx"] or "[]")
+    o["qc"] = json.loads(c["qc"]) if c.get("qc") else None
     o["hook_zoom"] = int(c["hook_zoom"]) if ("hook_zoom" in c and c["hook_zoom"] is not None) else 1
     o["emojis"] = int(c["emojis"]) if ("emojis" in c and c["emojis"] is not None) else 1
     o["censor"] = int(c["censor"]) if ("censor" in c and c["censor"] is not None) else 0
@@ -137,7 +143,23 @@ def videos(client_id: Optional[int] = None):
     rows = db.q(sql, args)
     for r in rows:
         r["curve"] = json.loads(r["curve"] or "[]")
+        who, plat = engine.credit(r)
+        if who:
+            key = f"{plat}:{who}".lower()
+            rule = db.q("select status, note from rules where key=?", (key,), one=True) or {"status": "unknown", "note": ""}
+            r["streamer"] = {"name": who, "platform": plat, "key": key, **rule}
     return rows
+
+
+@app.get("/api/past")
+def past(url: str):
+    """A channel's last 5 past streams, to make clips from a live you missed."""
+    try:
+        return source.past_streams(url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, str(e)[:300])
 
 
 @app.get("/api/videos/{vid}")
@@ -372,6 +394,29 @@ def auto_sfx(cid: int):
     return _clip_out(_clip(cid))
 
 
+@app.post("/api/clips/{cid}/ask")
+def ask_edit(cid: int, body: dict = Body(...)):
+    """Change a clip in plain words ('end 2 s earlier', 'split layout'). Uses the AI editor when a key is set,
+    simple built-in rules otherwise. Returns the clip and what changed."""
+    c = _clip(cid)
+    ask = str(body.get("text") or "").strip()
+    if not ask:
+        raise HTTPException(400, "Say what to change, like 'end 2 s earlier'.")
+    state = {k: c[k] for k in ai.EDIT_KEYS if k in c}
+    patch, key = ai.rule_edit(ask, state), engine.ai_key()
+    if key and not patch:
+        words = [w for w in json.loads(c["words"] or "[]") if c["start"] - 15 <= w["start"] <= c["end"] + 15]
+        try:
+            patch = ai.plan_edit(key, ask, state, words, list(TEMPLATES))
+        except Exception as e:
+            raise HTTPException(502, f"The AI editor didn't answer ({str(e)[:120]}).")
+    if not patch:
+        raise HTTPException(400, "I didn't understand that. Try 'end 2 s earlier', 'start 3 s later', 'title: ...', "
+                                 "'split layout', 'no captions' or '4k'." + ("" if key else " Add an AI key in Settings "
+                                                                              "for any other request."))
+    return {"changed": patch, "clip": patch_clip(cid, patch)}
+
+
 @app.patch("/api/clips/{cid}")
 def patch_clip(cid: int, body: dict = Body(...)):
     c = _clip(cid)
@@ -509,9 +554,26 @@ def save_words_endpoint(cid: int, body: list = Body(...)):
     return {"ok": True}
 
 
+RULES = ("allowed", "tips", "no", "unknown")
+
+
+@app.put("/api/rules")
+def set_rule(body: dict = Body(...)):
+    """What a streamer says about clipping their streams: allowed, tips (allowed with conditions), no, unknown."""
+    key, status, note = str(body.get("key") or "").strip().lower(), body.get("status"), str(body.get("note") or "")[:1000]
+    if not key or status not in RULES:
+        raise HTTPException(400, "Pick one of: allowed, tips, no, unknown.")
+    db.ex("insert into rules(key,status,note) values(?,?,?) on conflict(key) do update set status=excluded.status, "
+          "note=excluded.note", (key, status, note))
+    return {"key": key, "status": status, "note": note}
+
+
 @app.post("/api/clips/{cid}/approve")
-def approve_clip(cid: int):
+def approve_clip(cid: int, body: Optional[dict] = Body(None)):
     c = _clip(cid)
+    s = _video(c["video_id"]).get("streamer")
+    if s and s["status"] == "no" and not (body or {}).get("permission"):
+        raise HTTPException(409, f"{s['name']} doesn't allow clipping. Only go on if you have their permission.")
     db.ex("update clips set status='approved' where id=?", (cid,))
     is_rendered = bool(c["render_path"] and os.path.exists(c["render_path"]))
     needs_render = not is_rendered
@@ -538,6 +600,29 @@ def download_clip(cid: int):
     db.ex("update clips set downloaded=1 where id=?", (cid,))
     name = re.sub(r"[^\w\-.]+", "_", c["title"] or f"clip_{cid}").strip("_") + ".mp4"
     return FileResponse(p, filename=name, media_type="video/mp4")
+
+
+@app.get("/api/clips/{cid}/post")
+def post_text(cid: int):
+    c = _clip(cid)
+    return {"text": engine.post_text(c, _video(c["video_id"]))}
+
+
+@app.get("/api/clips/{cid}/cover")
+def cover(cid: int):
+    """A full-size picture of the finished clip at its big moment, for the video's cover."""
+    c = _clip(cid)
+    if not (c["render_path"] and os.path.exists(c["render_path"])):
+        raise HTTPException(404, "Make the clip first, then the cover comes from it.")
+    t = min(max(c["peak"] - c["start"], 0.5), c["end"] - c["start"] - 0.2) if c["peak"] else 1.0
+    out = os.path.splitext(c["render_path"])[0] + f"_cover_{t:.1f}.jpg"
+    if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(c["render_path"]):
+        subprocess.run([which("ffmpeg"), "-v", "error", "-y", "-ss", f"{t:.2f}", "-i", c["render_path"], "-frames:v", "1",
+                        "-q:v", "2", out], capture_output=True, timeout=60)
+    if not os.path.exists(out):
+        raise HTTPException(500, "Couldn't make the cover picture.")
+    _slug = lambda s: re.sub(r"[^\w\-.]+", "_", s or "").strip("_")
+    return FileResponse(out, media_type="image/jpeg", filename=f"ClipForge_{_slug(c['title'])}_cover.jpg")
 
 
 # ---------------- live ----------------

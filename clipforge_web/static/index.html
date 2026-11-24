@@ -42,6 +42,10 @@
       <input id="files" type="file" accept="video/*,.mkv" multiple hidden>
       <div id="uploads"></div>
       <p class="muted small" style="margin:0">Clips are found automatically. 100 clips from a 20-minute video works at about 12 seconds each.</p>
+      <details id="pastBox"><summary class="muted small" style="cursor:pointer">Missed a live? Past streams of a channel</summary>
+        <div class="stack" style="margin-top:8px">
+          <div class="row"><input id="pastUrl" placeholder="twitch.tv/name or youtube.com/@name"><button id="pastGo" class="fit">Show</button></div>
+          <div id="pastList" class="stack"></div></div></details>
     </div>
 
     <div class="card stack">
@@ -154,6 +158,12 @@ $('#addLinks').onclick=guard(async()=>{
   const r=await send('POST','/api/videos/link',{urls,max_height:+$('#quality').value.replace('q',''),quick:$('#quality').value[0]==='q',client_id:S.client,clips:+$('#a_clips').value,length:+$('#a_len').value});
   $('#links').value='';await tick();selectVideo(r.ids[0]);
 });
+$('#pastGo').onclick=guard(async()=>{
+  const box=$('#pastList');box.innerHTML='<p class="muted small" style="margin:0">Looking…</p>';
+  try{const l=await api('/api/past?url='+encodeURIComponent($('#pastUrl').value.trim()));
+    box.innerHTML=l.length?l.map((p,i)=>`<div class="row" style="align-items:center;margin-bottom:6px"><div style="flex:1;min-width:0"><div class="small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.title)}</div><div class="muted small">${p.duration?fmtLong(p.duration):''}</div></div><button class="fit" data-p="${i}" style="padding:4px 8px;font-size:12px">Make clips</button></div>`).join(''):'<p class="muted small" style="margin:0">No past streams found.</p>';
+    box.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{$('#links').value=l[+b.dataset.p].url;$('#addLinks').click()});
+  }catch(e){box.innerHTML='';throw e}});
 $('#pick').onclick=()=>$('#files').click();
 $('#files').onchange=e=>{[...e.target.files].forEach(uploadFile);e.target.value=''};
 function uploadFile(f){
@@ -354,13 +364,17 @@ function drawMap(){
 }
 function scoreCol(s){return s>=.6?'var(--good)':s>=.35?'var(--mid)':'var(--low)'}
 function bar(label,val){return val==null?'':`<div>${label} ${Math.round(val*100)}<div class="bar"><i style="width:${Math.round(val*100)}%"></i></div></div>`}
+const RULE={allowed:['Clipping allowed','ok'],tips:['Has clip tips','busy'],no:['No clipping','err'],unknown:['Rules unknown','']};
+function ruleBadge(v){const s=v.streamer;if(!s)return '';const[t,c]=RULE[s.status]||RULE.unknown;
+  return ` · <span class="pill ${c}" style="cursor:pointer" id="ruleBtn" title="Click to edit clipping permission">${esc(s.name)}: ${t}</span>`}
 function stateBadge(k){
-  if(k.render_status==='running'||k.render_status==='queued')return `<span class="pill busy">${k.render_status==='queued'?'Waiting':'Preparing '+Math.round(k.render_progress)+'%'}</span>`;
-  if(k.render_status==='failed')return '<span class="pill err">Failed</span>';
-  if(k.status==='approved'&&k.rendered&&k.downloaded)return '<span class="pill ok">Saved to Downloads ✓</span>';
-  if(k.status==='approved'&&k.rendered)return '<span class="pill ok">Ready</span>';
-  if(k.status==='approved')return '<span class="pill ok">Approved</span>';
-  if(k.status==='rejected')return '<span class="pill">Rejected</span>';return '';
+  const qcWarn = (k.qc&&k.qc.some(x=>x.level==='fail')) ? '<span class="pill err" style="background:#ef444433;color:#ef4444;border:1px solid #ef4444" title="Quality issue detected">⚠️ Check quality</span> ' : '';
+  if(k.render_status==='running'||k.render_status==='queued')return qcWarn + `<span class="pill busy">${k.render_status==='queued'?'Waiting':'Preparing '+Math.round(k.render_progress)+'%'}</span>`;
+  if(k.render_status==='failed')return qcWarn + '<span class="pill err">Failed</span>';
+  if(k.status==='approved'&&k.rendered&&k.downloaded)return qcWarn + '<span class="pill ok">Saved to Downloads ✓</span>';
+  if(k.status==='approved'&&k.rendered)return qcWarn + '<span class="pill ok">Ready</span>';
+  if(k.status==='approved')return qcWarn + '<span class="pill ok">Approved</span>';
+  if(k.status==='rejected')return qcWarn + '<span class="pill">Rejected</span>';return qcWarn;
 }
 function drawCands(){
   const box=$('#cands');if(!box)return;
@@ -610,6 +624,7 @@ function buildEditor(){
         <button class="s-tab" data-tab="captions">💬 Subtitles</button>
         <button class="s-tab" data-tab="audio">🎵 Audio & SFX</button>
         <button class="s-tab" data-tab="import">📁 PC Import</button>
+        <button class="s-tab" data-tab="ai">✨ Ask AI & Post</button>
       </div>
 
       <div class="studio-tab-content">
@@ -763,6 +778,31 @@ function buildEditor(){
             <div id="pcUploadedList" class="stack"></div>
           </div>
         </div>
+
+        <!-- Panel 6: Ask AI & Post -->
+        <div class="studio-panel" id="spanel-ai">
+          <div class="card" style="background:#131828;border:1px solid #2d3748;padding:12px;border-radius:8px">
+            <label style="margin:0;font-weight:700">✨ Change Clip in Plain Words (Ask AI)</label>
+            <p class="muted small" style="margin:4px 0 8px">Say what to change in simple English:</p>
+            <div class="row" style="gap:6px">
+              <input id="ask" placeholder="e.g. end 2s earlier, split layout, title: Epic Win" style="flex:1">
+              <button id="askGo" class="fit primary" style="font-weight:600">Change</button>
+            </div>
+            <p class="muted small" style="margin:6px 0 0;font-size:11px">Examples: "end 2 s earlier", "start 3 s later", "title: Watch this", "split layout", "4k".</p>
+          </div>
+
+          <div id="qcbox" style="margin-top:10px"></div>
+
+          <div class="card" style="background:#131828;border:1px solid #2d3748;padding:12px;border-radius:8px;margin-top:10px">
+            <label style="margin:0;font-weight:700">📋 Ready-to-Paste Post Text</label>
+            <p class="muted small" style="margin:4px 0 6px">Includes title, streamer credit, and hashtags:</p>
+            <textarea id="post" rows="4" style="width:100%;font-size:12px;resize:vertical" placeholder="Loading post text..."></textarea>
+            <div class="row" style="margin-top:8px;gap:8px">
+              <button id="postCopy" class="fit" style="font-size:12px">Copy Post Text</button>
+              <button id="cover" class="fit" style="font-size:12px" hidden>Download Cover Image</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -880,6 +920,22 @@ function buildEditor(){
   $('#approve').onclick=guard(()=>approve(S.cid));
   $('#reject').onclick=guard(()=>save({status:'rejected'}).then(()=>{toast('Rejected.');showEditor(false)}));
   $('#title').onchange=guard(e=>save({title:e.target.value}));
+
+  // Ask AI & Post text handlers
+  const ask=guard(async()=>{
+    const t=$('#ask')?.value?.trim();if(!t)return;
+    const r=await send('POST','/api/clips/'+S.cid+'/ask',{text:t});
+    toast('Changed: '+Object.keys(r.changed).join(', ')+'.');
+    await loadClips();
+    await selectClip(S.cid);
+  });
+  if($('#askGo')) $('#askGo').onclick=ask;
+  if($('#ask')) $('#ask').onkeydown=e=>{if(e.key==='Enter')ask()};
+  if($('#post')){
+    api('/api/clips/'+c.id+'/post').then(r=>{if(S.cid===c.id&&$('#post'))$('#post').value=r.text}).catch(()=>{});
+  }
+  if($('#postCopy')) $('#postCopy').onclick=guard(async()=>{const t=$('#post');try{await navigator.clipboard.writeText(t.value)}catch{t.select();document.execCommand('copy')}toast('Post text copied.')});
+  if($('#cover')) $('#cover').onclick=()=>{const a=document.createElement('a');a.href='/api/clips/'+S.cid+'/cover';a.download='';document.body.appendChild(a);a.click();a.remove()};
 
   // Keyboard shortcut Spacebar to play/pause in studio
   window.onkeydown=e=>{
@@ -1761,6 +1817,16 @@ function updateApproveUI(){
   else if(c.status==='approved'&&c.rendered&&rs==='done')txt=c.downloaded?'Saved ✓  Download again':'Download';
   else txt='🚀 Approve & Export';
   if(lab&&lab.dataset.t!==txt){lab.dataset.t=txt;lab.innerHTML=txt.includes('✓')?txt.replace('✓','<b class="check">✓</b>'):esc(txt)}
+  const q=$('#qcbox');
+  if(q){
+    const qk=JSON.stringify(c.qc);
+    if(q.dataset.k!==qk){
+      q.dataset.k=qk;
+      q.innerHTML=c.qc==null?'':'<label style="font-size:12px;font-weight:700;color:var(--text)">Quality check</label>'+(c.qc.length?`<ul class="why" style="margin-top:4px">${c.qc.map(x=>`<li style="color:var(--${x.level==='fail'?'low':'mid'});font-size:12px">${x.level==='fail'?'Problem':'Check'}: ${esc(x.msg)}</li>`).join('')}</ul>`:'<p class="small" style="color:var(--good);margin:4px 0 0">Looks good ✓</p>');
+    }
+  }
+  const cv=$('#cover');
+  if(cv) cv.hidden=!(c.rendered&&rs==='done');
   const err=$('#rerr');if(rs==='failed'&&!err){const ep=b.closest('.studio-head-right');if(ep){const e=document.createElement('p');e.id='rerr';e.className='small';e.style.cssText='color:var(--low);margin:4px 0 0';e.textContent=c.render_error||'The clip could not be made.';ep.appendChild(e)}}
   else if(rs!=='failed'&&err)err.remove();
 }

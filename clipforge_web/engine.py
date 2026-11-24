@@ -1,5 +1,5 @@
 """The work behind the buttons: import a video, find clips, frame them on the face, render."""
-import json, os, re, subprocess
+import functools, json, os, re, subprocess
 import numpy as np
 
 from clipforge import ai, analyze, audiolib, captions, faces
@@ -758,4 +758,62 @@ def render(job, clip_id, p):
                 cam_crop_y=float(c.get("cam_crop_y") if c.get("cam_crop_y") is not None else 0.5),
                 cam_corner=c.get("cam_corner") or "tr",
                 aspect_ratio=aspect)
-    db.ex("update clips set render_status='done', render_progress=100, render_path=? where id=?", (out, clip_id))
+    db.ex("update clips set render_status='done', render_progress=100, render_path=?, qc=? where id=?",
+          (out, db.dumps(quality_check(ffmpeg, out, clip_words(c))), clip_id))
+
+
+# ---------------- quality check, post text ----------------
+def quality_check(ffmpeg, path, words):
+    """Problems a viewer would notice: [{"level": "fail"|"warn", "msg": ...}]. Empty list = looks fine."""
+    r = subprocess.run([ffmpeg, "-v", "info", "-i", path, "-vf", "blackdetect=d=1:pix_th=0.08", "-af", "volumedetect",
+                        "-f", "null", "-"], capture_output=True, text=True)
+    log = r.stderr
+    return qc_from_log(log, probe(which("ffprobe"), path)["duration"], words)
+
+
+def qc_from_log(log, dur, words):
+    out = []
+    if dur < 6:
+        out.append({"level": "fail", "msg": f"Only {dur:.0f} seconds long. Shorts under 6 s rarely get views."})
+    m = re.search(r"mean_volume: (-?[\d.]+) dB", log)
+    if m and float(m.group(1)) < -45:
+        out.append({"level": "fail", "msg": "The sound is almost silent."})
+    black = sum(float(x) for x in re.findall(r"black_duration:([\d.]+)", log))
+    if black > max(1.5, dur * 0.25):
+        out.append({"level": "warn", "msg": f"{black:.0f} s of black screen."})
+    if not words:
+        out.append({"level": "warn", "msg": "Nobody speaks in this clip, so there are no captions."})
+    elif len(words) / max(dur, 1) < 0.5:
+        out.append({"level": "warn", "msg": "Very little speech: check it still makes sense without sound."})
+    return out
+
+
+@functools.lru_cache(maxsize=512)
+def _uploader(info_path, mtime):
+    with open(info_path, encoding="utf-8") as f:
+        info = json.load(f)
+    return info.get("channel") or info.get("uploader")
+
+
+def credit(v):
+    """(streamer name or None, platform name or '') for a video, from its link and download info."""
+    if not v:
+        return None, ""
+    src = v.get("source") or ""
+    plat = next((n for k, n in (("twitch.tv", "Twitch"), ("kick.com", "Kick"), ("youtu", "YouTube")) if k in src), "")
+    who = None
+    if v.get("info_path") and os.path.exists(v["info_path"]):
+        who = _uploader(v["info_path"], os.path.getmtime(v["info_path"]))
+    m = re.search(r"(?:twitch\.tv|kick\.com)/([A-Za-z0-9_]+)|youtube\.com/@([\w.-]+)", src)
+    if not who and m and (m.group(1) or "").lower() != "videos":
+        who = m.group(1) or m.group(2)
+    return who, plat
+
+
+def post_text(c, v):
+    """Ready-to-paste post: title, credit to the streamer and hashtags."""
+    who, plat = credit(v)
+    tag = re.sub(r"[^A-Za-z0-9]", "", who or "")
+    tags = ["#GTA6", "#GTA", "#Shorts"] + ([f"#{tag}"] if tag else []) + ([f"#{plat}"] if plat else [])
+    return "\n\n".join(x for x in (c["title"], f"Credit: {who}" + (f" on {plat}" if plat else "") if who else "",
+                                    " ".join(tags)) if x)

@@ -28,11 +28,12 @@ create table if not exists clips(
   cam_pos_x real default 0.5, cam_pos_y real default 0.65, banner_text text default '', banner_style text default 'white_box',
   split_ratio real default 0.5, cam_corner text default 'tr',
   cam_crop_x real default 0.5, cam_crop_y real default 0.5,
-  aspect_ratio text default '9:16');
+  aspect_ratio text default '9:16', qc text);
 create table if not exists jobs(
   id integer primary key, type text, ref_id integer, params text, status text,
   log text default '', error text, created real, started real, finished real);
 create table if not exists settings(key text primary key, value text);
+create table if not exists rules(key text primary key, status text, note text);
 """
 
 MIGRATE = {
@@ -69,6 +70,7 @@ MIGRATE = {
         ("cam_crop_x", "real default 0.5"),
         ("cam_crop_y", "real default 0.5"),
         ("aspect_ratio", "text default '9:16'"),
+        ("qc", "text"),
     ],
 }
 

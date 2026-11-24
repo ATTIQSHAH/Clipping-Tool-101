@@ -24,7 +24,7 @@ hidden = (
     collect_submodules('clipforge_web') +
     collect_submodules('curl_cffi') +
     ['engineio.async_drivers.threading',
-     'h11', 'httptools', 'websockets', 'wsproto',
+     'h11', 'httptools', 'websockets', 'websocket', 'wsproto',
      'email.mime.multipart', 'email.mime.text',
      'sqlite3', 'wave', 'json', 'csv', 'tempfile',
      'encodings', 'encodings.utf_8', 'encodings.ascii',

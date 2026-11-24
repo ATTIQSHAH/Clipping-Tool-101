@@ -156,7 +156,7 @@ def parse_live_chat(path):
 
 
 def live_chat_line(line):
-    """One line of a live_chat.json being written during a stream -> [(unix time, message)]."""
+    """One line of a live_chat.json being written during a stream -> [(unix time, message, author)]."""
     try:
         acts = json.loads(line)["replayChatItemAction"]["actions"]
     except (KeyError, ValueError, TypeError):
@@ -165,5 +165,34 @@ def live_chat_line(line):
     for a in acts:
         r = a.get("addChatItemAction", {}).get("item", {}).get("liveChatTextMessageRenderer")
         if r and r.get("timestampUsec"):
-            out.append((int(r["timestampUsec"]) / 1e6, "".join(x.get("text", "") for x in r.get("message", {}).get("runs", []))))
+            out.append((int(r["timestampUsec"]) / 1e6, "".join(x.get("text", "") for x in r.get("message", {}).get("runs", [])),
+                        r.get("authorName", {}).get("simpleText")))
     return out
+
+
+def past_list_url(channel):
+    """A channel link -> the yt-dlp link of its past live streams, newest first. ValueError if it isn't a channel."""
+    c = (channel or "").strip()
+    m = re.match(r"^(?:https?://)?(?:www\.|m\.)?twitch\.tv/([A-Za-z0-9_]+)", c)
+    if m and m.group(1).lower() not in ("videos", "directory"):
+        return f"https://www.twitch.tv/{m.group(1)}/videos?filter=archives&sort=time"
+    m = re.match(r"^(?:https?://)?(?:www\.|m\.)?youtube\.com/(@[\w.-]+|channel/[\w-]+)", c)
+    if m:
+        return f"https://www.youtube.com/{m.group(1)}/streams"
+    m = re.match(r"^(?:https?://)?(?:www\.)?kick\.com/([A-Za-z0-9_-]+)", c)
+    if m:
+        return f"https://kick.com/{m.group(1)}/videos"
+    raise ValueError("Paste a channel link, like https://www.twitch.tv/summit1g or https://www.youtube.com/@name")
+
+
+def past_streams(channel, n=5):
+    """The channel's last n past streams: [{url, title, duration}]."""
+    r = subprocess.run([which("yt-dlp"), "--flat-playlist", "-J", "--playlist-end", str(n), "--no-warnings",
+                        past_list_url(channel)], capture_output=True, text=True, timeout=120)
+    try:
+        d = json.loads(r.stdout)
+    except ValueError:
+        err = [ln for ln in r.stderr.splitlines() if ln.startswith("ERROR:")]
+        raise RuntimeError((err[-1].split(": ", 2)[-1] if err else "Couldn't read that channel's past streams.")[:300])
+    return [{"url": e.get("url") or e.get("webpage_url"), "title": e.get("title") or "", "duration": e.get("duration")}
+            for e in (d.get("entries") or [])[:n] if e.get("url") or e.get("webpage_url")]

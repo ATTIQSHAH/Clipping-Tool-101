@@ -14,22 +14,40 @@ _loaded = None                # (model, device, compute) of the loaded model
 _lock = threading.Lock()      # the web app and live mode may transcribe at the same time
 
 
-def _load_wav(path):
-    # If already a valid WAV file, read directly
+CHUNK, PAD = 600.0, 5.0      # long audio goes in 10-minute pieces so memory stays flat (a 3 h file whole took ~7 GB)
+
+
+def _load_wav(path, start=0.0, end=None):
     try:
         with wave.open(path, "rb") as w:
-            data = w.readframes(w.getnframes())
+            sr, n = w.getframerate(), w.getnframes()
+            a, b = int(start * sr), n if end is None else min(n, int(end * sr))
+            w.setpos(min(a, n))
+            data = w.readframes(max(b - a, 0))
             if len(data):
                 return np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
     except Exception:
         pass
 
-    # Extract 16 kHz mono audio using ffmpeg for mp4, mkv, webm, etc.
     from .util import which
     ffmpeg = which("ffmpeg")
-    cmd = [ffmpeg, "-nostdin", "-v", "error", "-i", path, "-ar", "16000", "-ac", "1", "-f", "s16le", "-"]
+    ss_args = ["-ss", f"{start:.3f}"] if start > 0 else []
+    t_args = ["-t", f"{(end - start):.3f}"] if end is not None else []
+    cmd = [ffmpeg, "-nostdin", "-v", "error"] + ss_args + t_args + ["-i", path, "-ar", "16000", "-ac", "1", "-f", "s16le", "-"]
     raw = subprocess.run(cmd, capture_output=True).stdout
     return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+
+
+def wav_seconds(path):
+    try:
+        with wave.open(path, "rb") as w:
+            return w.getnframes() / w.getframerate()
+    except Exception:
+        from .util import which, probe
+        try:
+            return float(probe(which("ffprobe"), path)["duration"])
+        except Exception:
+            return 0.0
 
 
 def transcribe_file(wav, model="base", device="cpu", compute="int8", language=None, on_progress=None,
@@ -48,26 +66,24 @@ def transcribe_file(wav, model="base", device="cpu", compute="int8", language=No
             cpu_threads = max(1, min(4, (os.cpu_count() or 4) // 2))
             _model = WhisperModel(model, device=device, compute_type=compute, cpu_threads=cpu_threads, num_workers=1)
             _loaded = (model, device, compute)
-    audio = _load_wav(wav)
-    total = max(len(audio) / 16000.0, 0.1)
-    words = []
-    with _lock:
-        segs, _ = _model.transcribe(audio, word_timestamps=True, vad_filter=True,
-                                    language=language, condition_on_previous_text=False)
-        for s in segs:
-            if should_stop:
-                should_stop()
-            if on_progress:
-                on_progress(min(1.0, s.end / total))
-            import time; time.sleep(0.002)
-            if should_stop:
-                should_stop()
-            if on_progress:
-                on_progress(min(1.0, s.end / total))
-            for w in (s.words or []):
-                t = w.word.strip()
-                if t:
-                    words.append({"w": t, "start": round(w.start, 3), "end": round(w.end, 3)})
+    total = max(wav_seconds(wav), 0.1)
+    words, pos = [], 0.0
+    while pos < total:
+        off = max(pos - PAD, 0.0)
+        audio = _load_wav(wav, off, pos + CHUNK + PAD)
+        with _lock:
+            segs, _ = _model.transcribe(audio, word_timestamps=True, vad_filter=True,
+                                        language=language, condition_on_previous_text=False)
+            for s in segs:
+                if should_stop:
+                    should_stop()
+                if on_progress:
+                    on_progress(min(1.0, (off + s.end) / total))
+                for w in (s.words or []):
+                    t, st = w.word.strip(), off + w.start
+                    if t and pos <= st < pos + CHUNK:
+                        words.append({"w": t, "start": round(st, 3), "end": round(off + w.end, 3)})
+        pos += CHUNK
     return {"words": words}
 
 
