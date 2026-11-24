@@ -435,6 +435,8 @@ class Live:
                 self.chat.close()
                 db.ex("update videos set status='ready', stage='', progress=100 where id=? and status='live'", (self.id,))
         if self.state != "error":
+            if self.segs:
+                self._save_length()                            # the final length, not the last 5-second update
             self.state = "stopped"
 
     def _detect(self, t, c, audio, chat):
@@ -465,12 +467,16 @@ class Live:
         self.moments += 1
         self.pending.put((peak_t, peak, audio, chat, how))
 
+    def _save_length(self):
+        step = max(1, len(self.hist) // 400)
+        curve = [round(max(h[2] for h in self.hist[i:i + step]), 3) for i in range(0, len(self.hist), step)]
+        db.ex("update videos set duration=?, curve=? where id=?", (self.media_time(), db.dumps({"step": float(step), "v": curve}), self.id))
+        self.saved_at = time.time()
+
     def _housekeeping(self):
         t = self.media_time()
-        if len(self.hist) % 5 == 0 and self.hist:
-            step = max(1, len(self.hist) // 400)
-            curve = [round(max(h[2] for h in self.hist[i:i + step]), 3) for i in range(0, len(self.hist), step)]
-            db.ex("update videos set duration=?, curve=? where id=?", (t, db.dumps({"step": float(step), "v": curve}), self.id))
+        if self.hist and time.time() - getattr(self, "saved_at", 0) >= 5:
+            self._save_length()
         keep_from = min(t - self.cfg["buffer"], self.needed_from if self.pending.qsize() else 1e9)
         for name, s, e in list(self.segs):
             f = os.path.join(self.dir, name)
