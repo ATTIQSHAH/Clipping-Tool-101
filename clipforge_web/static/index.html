@@ -93,6 +93,34 @@
       </div>
       <p id="s_ck_status" class="muted small" style="margin:6px 0 0">Used to download 18+ age-restricted YouTube videos automatically.</p>
     </div>
+    <div style="border-top:1px solid var(--line);padding-top:14px;margin-top:6px">
+      <label style="font-weight:600;display:flex;align-items:center;gap:6px">
+        <span>💾 Data Storage & Auto-Cleanup</span>
+      </label>
+      <div id="storageStatsBox" style="background:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:6px;font-size:12px;line-height:1.7">
+        <div class="row" style="justify-content:space-between"><span>⭐ <b>Saved Videos (Exports):</b></span><span id="st_exports" style="color:#4ade80;font-weight:bold">0 MB</span></div>
+        <div class="row" style="justify-content:space-between"><span>🧹 <b>Temporary Audio & Feature Cache:</b></span><span id="st_work" style="color:var(--muted)">0 MB</span></div>
+        <div class="row" style="justify-content:space-between"><span>📹 <b>Source Videos & Slices:</b></span><span id="st_originals" style="color:var(--muted)">0 MB</span></div>
+        <div class="row" style="justify-content:space-between"><span>📡 <b>Live Stream Chunks:</b></span><span id="st_live" style="color:var(--muted)">0 MB</span></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px;border-top:1px dashed var(--line);padding-top:4px">
+          🛡️ <i>Your approved and rendered clips in <code>data/exports/</code> are permanent and never deleted automatically.</i>
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <label for="s_retention">Auto-delete temporary cache</label>
+        <div class="row" style="gap:8px;align-items:center">
+          <select id="s_retention" style="flex:1">
+            <option value="24">After 1 day (24 hours)</option>
+            <option value="48">After 2 days (48 hours) - Recommended</option>
+            <option value="72">After 3 days (72 hours)</option>
+            <option value="168">After 7 days</option>
+            <option value="0">Never auto-delete</option>
+          </select>
+          <button id="s_cleanup_btn" type="button" class="ghost fit" style="white-space:nowrap">🧹 Clean Now</button>
+        </div>
+        <p class="muted small" style="margin:6px 0 0">Automatically deletes intermediate wav/npy files, whisper audio, and preview slices after 1–2 days. Rendered/saved clips are always preserved.</p>
+      </div>
+    </div>
     <p id="s_state" class="small"></p>
     <div class="row"><button id="s_save" class="primary">Save</button><button id="s_test">Test key</button><button id="s_close" class="ghost">Close</button></div>
   </div>
@@ -2127,10 +2155,21 @@ function updateCookieUI(){
     }
   }
 }
+async function refreshStorageUI(){
+  try{
+    const st=await api('/api/settings/storage');
+    if($('#st_exports'))$('#st_exports').textContent=st.exports_str||'0 B';
+    if($('#st_work'))$('#st_work').textContent=st.work_str||'0 B';
+    if($('#st_originals'))$('#st_originals').textContent=st.originals_str||'0 B';
+    if($('#st_live'))$('#st_live').textContent=st.live_str||'0 B';
+    if($('#s_retention'))$('#s_retention').value=String(st.cleanup_hours??48);
+  }catch(e){}
+}
 if($('#mainCookieBadge'))$('#mainCookieBadge').onclick=()=>$('#setBtn').click();
 $('#setBtn').onclick=guard(async()=>{
   S.settings=await api('/api/settings');$('#s_model').value=S.settings.model||'base';$('#s_key').value='';
   updateCookieUI();
+  refreshStorageUI();
   $('#s_state').textContent=S.settings.anthropic_key?(S.settings.ai_from_env?'AI scoring is on (key from the computer settings).':'AI scoring is on.'):'AI scoring is off.';$('#settings').showModal()});
 $('#s_close').onclick=()=>$('#settings').close();
 $('#s_upload_ck').onclick=()=>$('#s_file_ck').click();
@@ -2147,11 +2186,24 @@ $('#s_del_ck').onclick=guard(async()=>{
 $('#s_save').onclick=guard(async()=>{
   const b={model:$('#s_model').value,cookies_browser:$('#s_browser').value};
   if($('#s_key').value.trim())b.anthropic_key=$('#s_key').value.trim();
+  if($('#s_retention'))b.cleanup_hours=parseInt($('#s_retention').value,10);
   S.settings=await send('POST','/api/settings',b);$('#s_key').value='';
   $('#s_state').textContent=S.settings.anthropic_key?'Saved. AI scoring is on.':'Saved. AI scoring is off.';
   updateCookieUI();
+  refreshStorageUI();
 });
 $('#s_test').onclick=guard(async()=>{$('#s_state').textContent='Testing…';try{await send('POST','/api/settings/test');$('#s_state').textContent='The key works.'}catch(e){$('#s_state').textContent=e.message}});
+$('#s_cleanup_btn').onclick=guard(async()=>{
+  const btn=$('#s_cleanup_btn');
+  btn.disabled=true;btn.textContent='Cleaning…';
+  try{
+    const res=await send('POST','/api/settings/cleanup',{older_than_hours:0,clean_all_temp:true});
+    await refreshStorageUI();
+    toast(`Freed ${res.freed_mb||'0 MB'} of temporary cache! Saved videos preserved.`);
+  }finally{
+    btn.disabled=false;btn.textContent='🧹 Clean Now';
+  }
+});
 
 /* ---------------- polling ---------------- */
 let busyTick=false;

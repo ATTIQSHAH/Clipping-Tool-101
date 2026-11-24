@@ -140,7 +140,7 @@ main{padding:20px 24px}
 #approve span{position:relative}
 .check{display:inline-block;animation:pop .5s var(--ease)}
 @keyframes pop{0%{transform:scale(0)}70%{transform:scale(1.35)}100%{transform:scale(1)}}
-dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:16px;padding:22px;width:min(440px,92vw)}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:16px;padding:22px;width:min(480px,94vw);max-height:90vh;overflow-y:auto}
 dialog::backdrop{background:#000a;backdrop-filter:blur(3px)}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 18px;z-index:9;animation:swap .3s var(--ease);box-shadow:0 10px 30px #0008}
 #toast.err{border-color:var(--low);color:#ffd0d6}

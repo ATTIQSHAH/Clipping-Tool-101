@@ -83,6 +83,11 @@ MIGRATE = {
 
 def conn():
     global _conn
+    if _conn is not None:
+        try:
+            _conn.total_changes
+        except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+            _conn = None
     if _conn is None:
         os.makedirs(DATA, exist_ok=True)
         db_file = os.path.join(DATA, "clipforge.db")

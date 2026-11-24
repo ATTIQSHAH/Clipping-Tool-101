@@ -42,7 +42,6 @@ class TestFeatures(unittest.TestCase):
         cols = [r[1] for r in c.execute("PRAGMA table_info(clips)").fetchall()]
         for expected in ["cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style", "game_zoom", "crop_y", "banner_x", "banner_y"]:
             self.assertIn(expected, cols, f"Column {expected} missing from clips table")
-        c.close()
 
 if __name__ == '__main__':
     unittest.main()

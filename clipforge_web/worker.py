@@ -78,6 +78,20 @@ def _loop():
         db.ex("update jobs set status=?, error=?, finished=? where id=?", (status, err, db.now(), row["id"]))
 
 
+def _cleanup_loop():
+    """Background janitor that periodically purges old temporary working caches."""
+    time.sleep(5)
+    from . import storage
+    while True:
+        try:
+            storage.clean_storage()
+        except Exception as e:
+            pass
+        # Sleep 4 hours between routine cleanup checks
+        for _ in range(4 * 60):
+            time.sleep(60)
+
+
 def start():
     db.ex("update jobs set status='failed', error='Interrupted (app was closed)' where status='running'")
     for v in db.q("select id,path,duration from videos where status in ('importing','analyzing')"):
@@ -86,6 +100,7 @@ def start():
     db.ex("update clips set render_status='none', render_progress=0 where render_status in ('queued','running')")
     for _ in range(WORKERS):
         threading.Thread(target=_loop, daemon=True).start()
+    threading.Thread(target=_cleanup_loop, daemon=True).start()
 
 
 def enqueue(type_, ref_id, params=None):

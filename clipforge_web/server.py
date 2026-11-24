@@ -9,7 +9,7 @@ from clipforge import ai, audiolib, source
 from clipforge.captions import TEMPLATES
 from clipforge.render import RES
 from clipforge.util import which, silent_flags
-from . import db, engine, live, worker
+from . import db, engine, live, storage, worker
 
 app = FastAPI(title="ClipForge")
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -769,6 +769,7 @@ def audio():
 @app.get("/api/settings")
 def get_settings():
     cf = source.find_cookie_file()
+    cleanup_h = int(db.setting("cleanup_hours", "48") or 48)
     return {
         "anthropic_key": bool(db.setting("anthropic_key")),
         "has_password": bool(_pw()),
@@ -777,6 +778,7 @@ def get_settings():
         "has_cookies": bool(cf),
         "cookies_file": os.path.basename(cf) if cf else "",
         "cookies_path": cf or "",
+        "cleanup_hours": cleanup_h,
     }
 
 
@@ -788,7 +790,24 @@ def update_settings(body: dict = Body(...)):
         db.set_setting("password", (body["password"] or "").strip())
     if "cookies_browser" in body:
         db.set_setting("cookies_browser", (body["cookies_browser"] or "").strip())
+    if "cleanup_hours" in body:
+        try:
+            db.set_setting("cleanup_hours", str(int(body["cleanup_hours"])))
+        except (ValueError, TypeError):
+            pass
     return get_settings()
+
+
+@app.get("/api/settings/storage")
+def storage_stats():
+    return storage.get_storage_stats()
+
+
+@app.post("/api/settings/cleanup")
+def cleanup_temp_storage(body: dict = Body(default={})):
+    older = body.get("older_than_hours")
+    clean_all = bool(body.get("clean_all_temp"))
+    return storage.clean_storage(older_than_hours=older, clean_all_temp=clean_all)
 
 
 @app.post("/api/settings/cookies/upload")
