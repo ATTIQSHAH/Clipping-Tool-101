@@ -1,6 +1,6 @@
 """Live-stream clipping. Records a Twitch/Kick stream in short pieces, watches the sound and the chat in real
-time, and cuts a clip whenever something big happens. Honest limits: Twitch and YouTube chat are read live; Kick chat is not
-supported (sound only); platforms have no "likes" on a live stream, so chat bursts and crowd noise stand in."""
+time, and cuts a clip whenever something big happens. Twitch, YouTube and Kick chat are read live (read only, no
+account); platforms have no "likes" on a live stream, so chat bursts and crowd noise stand in."""
 import collections, csv, json, os, queue, random, re, socket, ssl, subprocess, tempfile, threading, time, traceback
 import numpy as np
 
@@ -16,6 +16,8 @@ CHAT_FACTORY = None          # tests replace this
 SEG_SECONDS = 5
 NOT_CHANNELS = {"videos", "video", "directory", "downloads", "clips", "settings", "p", "about", "login"}
 TEST_FILES = os.environ.get("CLIPFORGE_TEST_SOURCES") == "1"   # lets tests play a local file as a "stream"
+STALL = 45                   # seconds with no new piece of video = the stream froze (Kick does this): reconnect
+GIVE_UP = 300                # seconds of failed reconnects before we decide the stream is over
 DEFAULT_CFG = dict(warmup=60.0, hi=0.55, lo=0.30, cooldown=40.0, lead=22.0, tail=10.0, buffer=1200.0, model="base")
 
 
@@ -56,13 +58,16 @@ class TwitchChat(threading.Thread):
                 s = ssl.create_default_context().wrap_socket(raw, server_hostname="irc.chat.twitch.tv")
                 s.settimeout(30)
                 s.sendall(f"PASS SCHMOOPIIE\r\nNICK justinfan{random.randint(10000, 99999)}\r\nJOIN #{self.channel}\r\n".encode())
-                buf = b""
+                buf, last = b"", time.time()
                 self.connected, self.error = True, ""
                 while not self.stopped:
                     try:
                         chunk = s.recv(4096)
                     except socket.timeout:
+                        if time.time() - last > 400:           # Twitch pings every ~5 min; silence = dead socket (PC slept)
+                            break
                         continue
+                    last = time.time()
                     if not chunk:
                         break
                     buf += chunk
@@ -136,6 +141,75 @@ class YouTubeChat(threading.Thread):
             self.proc.terminate()
 
 
+def kick_msg(frame):
+    """Pusher frame (dict) -> message text for a Kick ChatMessageEvent, else None."""
+    if "ChatMessageEvent" not in frame.get("event", ""):
+        return None
+    d = json.loads(frame["data"]) if isinstance(frame.get("data"), str) else frame.get("data") or {}
+    return d.get("content")
+
+
+def _kick_get(url, body=None):
+    import requests
+    h = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
+    r = requests.post(url, json=body, headers=h, timeout=15) if body else requests.get(url, headers=h, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
+class KickChat(threading.Thread):
+    """Reads a Kick channel's public chat (read only, no account). Kick hands out the chat server key per request."""
+
+    def __init__(self, channel):
+        super().__init__(daemon=True)
+        self.channel, self.events, self.error, self.connected, self.stopped = channel.lower(), collections.deque(), "", False, False
+        self.ws = None
+
+    def run(self):
+        import websocket
+        while not self.stopped:
+            try:
+                ch = _kick_get(f"https://kick.com/api/v2/channels/{self.channel}")
+                c = _kick_get(f"https://web.kick.com/api/v1/realtime/channels/{ch['id']}/chat/connection",
+                              {"client": {"id": "clipforge", "type": "web"},
+                               "capabilities": {"accepted_providers": [{"provider": "pusher"}]}})
+                c = c["data"]["connections"][0]["credentials"]
+                self.ws = websocket.create_connection(
+                    f"wss://ws-{c['cluster']}.pusher.com/app/{c['app_key']}?protocol=7&client=js&version=8.4.0&flash=false",
+                    timeout=30, origin="https://kick.com")
+                self.ws.send(json.dumps({"event": "pusher:subscribe",
+                                         "data": {"auth": "", "channel": f"chatrooms.{ch['chatroom']['id']}.v2"}}))
+                self.connected, self.error = True, ""
+                while not self.stopped:
+                    try:
+                        f = json.loads(self.ws.recv())
+                    except websocket.WebSocketTimeoutException:
+                        self.ws.send(json.dumps({"event": "pusher:ping", "data": {}}))
+                        continue
+                    if f.get("event") == "pusher:ping":
+                        self.ws.send(json.dumps({"event": "pusher:pong", "data": {}}))
+                    elif (m := kick_msg(f)) is not None:
+                        self.events.append((time.time(), m))
+            except Exception as e:
+                self.error = f"Chat connection lost ({str(e)[:60]}). Retrying."
+            self.connected = False
+            if not self.stopped:
+                time.sleep(5)
+
+    def drain(self):
+        out = []
+        while self.events:
+            out.append(self.events.popleft())
+        return out
+
+    def close(self):
+        self.stopped = True
+        try:
+            self.ws and self.ws.close()
+        except Exception:
+            pass
+
+
 class NoChat:
     connected = False
 
@@ -157,7 +231,8 @@ def source_cmd(url):
     if TEST_FILES and os.path.exists(url):                    # test source: a local file played like a stream
         return [which("ffmpeg"), "-v", "error", "-readrate", os.environ.get("CLIPFORGE_TEST_READRATE", "1"),
                 "-i", url, "-c", "copy", "-f", "mpegts", "pipe:1"]
-    return [which("streamlink"), "--stdout", "--quiet", "--retry-streams", "3", "--retry-max", "3", url, "best"]
+    return [which("streamlink"), "--stdout", "--quiet", "--twitch-disable-ads", "--retry-streams", "3", "--retry-max", "3",
+            url, "best"]
 
 
 class Live:
@@ -175,7 +250,7 @@ class Live:
         self.chat_total, self.t0 = 0, None
         self.pending, self.moments, self.last_peak = queue.Queue(), 0, -999.0
         self.active = None
-        self.procs = []
+        self.procs, self.attempt, self.last_new = [], 0, time.time()
         self.chat = (CHAT_FACTORY or self._make_chat)(platform, channel)
         self.lock = threading.Lock()
         self.needed_from = 0.0
@@ -184,20 +259,39 @@ class Live:
     def _make_chat(self, platform, channel):
         if platform == "twitch":
             return TwitchChat(channel)
+        if platform == "kick":
+            return KickChat(channel)
         return YouTubeChat(self.url) if platform == "youtube" else NoChat(platform)
 
     # ----- lifecycle -----
+    def _record(self):
+        """(Re)start the recorder. Each attempt writes its own pieces and list; stream time just carries on."""
+        self.attempt += 1
+        self.seen, self.t0_fix, self.attempt_t = 0, True, time.time()
+        self.src = subprocess.Popen(source_cmd(self.url), stdout=subprocess.PIPE,
+                                    stderr=open(os.path.join(self.dir, "source.log"), "ab"))
+        seg_cmd = [which("ffmpeg"), "-y", "-v", "error", "-i", "pipe:0", "-c", "copy", "-f", "segment",
+                   "-segment_time", str(SEG_SECONDS), "-segment_format", "mpegts", "-segment_list", self._list(),
+                   "-segment_list_type", "csv", "-reset_timestamps", "1", f"seg_{self.attempt}_%06d.ts"]
+        self.seg = subprocess.Popen(seg_cmd, stdin=self.src.stdout, cwd=self.dir,
+                                    stderr=open(os.path.join(self.dir, "segmenter.log"), "ab"))
+        self.src.stdout.close()
+        self.procs = [self.src, self.seg]
+
+    def _list(self):
+        return f"list_{self.attempt}.csv"
+
+    def _kill(self):
+        for p in self.procs:
+            try:
+                p.kill()
+                p.wait(5)
+            except Exception:
+                pass
+
     def start(self):
         try:
-            self.src = subprocess.Popen(source_cmd(self.url), stdout=subprocess.PIPE,
-                                        stderr=open(os.path.join(self.dir, "source.log"), "wb"))
-            seg_cmd = [which("ffmpeg"), "-y", "-v", "error", "-i", "pipe:0", "-c", "copy", "-f", "segment",
-                       "-segment_time", str(SEG_SECONDS), "-segment_format", "mpegts", "-segment_list", "list.csv",
-                       "-segment_list_type", "csv", "-reset_timestamps", "1", "seg_%06d.ts"]
-            self.seg = subprocess.Popen(seg_cmd, stdin=self.src.stdout, cwd=self.dir,
-                                        stderr=open(os.path.join(self.dir, "segmenter.log"), "wb"))
-            self.src.stdout.close()
-            self.procs = [self.src, self.seg]
+            self._record()
         except Exception as e:
             self._fail(str(e))
             return
@@ -224,7 +318,7 @@ class Live:
 
     # ----- reading the recording -----
     def _read_segments(self):
-        path = os.path.join(self.dir, "list.csv")
+        path = os.path.join(self.dir, self._list())
         if not os.path.exists(path):
             return []
         with open(path, newline="") as f:
@@ -236,6 +330,8 @@ class Live:
             self.segs.append((r[0], start, start + d))
             new.append(self.segs[-1])
         self.seen = len(rows)
+        if new:
+            self.last_new = time.time()
         return new
 
     def _add_audio(self, name):
@@ -261,6 +357,23 @@ class Live:
             time.sleep(1.0)
             ended = self.src.poll() is not None and self.seg.poll() is not None
             new = self._read_segments()                        # read before judging, a short stream may be done
+            # a new connection gets extra time: Twitch shows ads first and we skip them
+            stalled = not ended and time.time() - max(self.last_new, self.attempt_t + STALL) > STALL
+            if (ended or stalled) and self.segs and not TEST_FILES and not self.stopped and time.time() - self.last_new < GIVE_UP:
+                # the stream dropped or froze: reconnect and keep going (pieces already read stay)
+                with open(os.path.join(self.dir, "source.log"), "a") as f:
+                    f.write(f"\n{time.strftime('%H:%M:%S')} {'froze' if stalled else 'ended'}: reconnecting\n")
+                self._kill()
+                db.ex("update videos set stage='Reconnecting' where id=? and status='live'", (self.id,))
+                time.sleep(3)
+                try:
+                    self._record()
+                except Exception:
+                    pass
+                continue
+            if stalled and not self.segs and time.time() - self.attempt_t > GIVE_UP:
+                self._kill()                                   # nothing ever arrived: give up below
+                ended = True
             if ended and not self.segs:
                 try:
                     tail = open(os.path.join(self.dir, "source.log"), errors="replace").read()[-300:].strip()
@@ -269,8 +382,9 @@ class Live:
                 self._fail("Couldn't open the stream. Is the channel live? " + tail)
                 return
             for name, s, e in new:
-                if self.t0 is None:
-                    self.t0 = time.time() - (e - s)
+                if self.t0 is None or self.t0_fix:             # line chat time up with video time (again after a reconnect)
+                    self.t0 = time.time() - e
+                    self.t0_fix = False
                     self.state = "recording"
                     db.ex("update videos set status='live', stage='Recording' where id=?", (self.id,))
                 self._add_audio(name)
@@ -286,7 +400,7 @@ class Live:
             # chat: bucket the new messages by stream second
             for wall, txt in self.chat.drain():
                 sec = int(wall - self.t0)
-                if sec < 0:
+                if sec < 0 or txt.startswith("!") or "http" in txt:   # bot commands and link ads are not a reaction
                     continue
                 while len(self.rate_x) <= sec:
                     self.rate_x.append(0.0)
@@ -427,7 +541,7 @@ class Live:
                 "audio": [round(h[0], 3) for h in recent], "chat": [round(h[1], 3) for h in recent],
                 "score": [round(h[2], 3) for h in recent], "moments": self.moments,
                 "chat_status": ("Reading chat" if getattr(self.chat, "connected", False) else (self.chat.error or "Connecting to chat"))
-                if self.platform in ("twitch", "youtube") else self.chat.error,
+                if self.platform in ("twitch", "youtube", "kick") else self.chat.error,
                 "chat_messages": self.chat_total, "platform": self.platform, "channel": self.channel,
                 "warmup": max(0.0, self.cfg["warmup"] - self.media_time())}
 
