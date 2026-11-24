@@ -28,7 +28,8 @@ create table if not exists rules(key text primary key, status text, note text);
 
 MIGRATE = {
     "videos": [("hd", "integer default 0"), ("cookies", "text"), ("client_id", "integer"), ("kind", "text"), ("progress", "real default 0"), ("stage", "text default ''"), ("cam_box", "text")],
-    "clips": [("render_progress", "real default 0"), ("src", "text"), ("track", "text"), ("downloaded", "integer default 0"), ("stream_offset", "real default 0"), ("cam", "text"), ("sfx", "text"), ("qc", "text")],
+    "clips": [("render_progress", "real default 0"), ("src", "text"), ("track", "text"), ("downloaded", "integer default 0"), ("stream_offset", "real default 0"), ("cam", "text"), ("sfx", "text"), ("qc", "text"),
+              ("views", "integer"), ("lang", "text default ''"), ("vo", "text default ''")],
 }
 
 

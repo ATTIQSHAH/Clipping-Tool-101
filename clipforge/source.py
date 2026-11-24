@@ -109,14 +109,29 @@ def past_list_url(channel):
     raise ValueError("Paste a channel link, like https://www.twitch.tv/summit1g or https://www.youtube.com/@name")
 
 
-def past_streams(channel, n=5):
-    """The channel's last n past streams: [{url, title, duration}]."""
-    r = subprocess.run([which("yt-dlp"), "--flat-playlist", "-J", "--playlist-end", str(n), "--no-warnings",
-                        past_list_url(channel)], capture_output=True, text=True, timeout=120)
+def _flat(url, n, what):
+    r = subprocess.run([which("yt-dlp"), "--flat-playlist", "-J", "--playlist-end", str(n), "--no-warnings", url],
+                       capture_output=True, text=True, timeout=180)
     try:
-        d = json.loads(r.stdout)
+        return json.loads(r.stdout).get("entries") or []
     except ValueError:
         err = [ln for ln in r.stderr.splitlines() if ln.startswith("ERROR:")]
-        raise RuntimeError((err[-1].split(": ", 2)[-1] if err else "Couldn't read that channel's past streams.")[:300])
+        raise RuntimeError((err[-1].split(": ", 2)[-1] if err else f"Couldn't read that channel's {what}.")[:300])
+
+
+def past_streams(channel, n=5):
+    """The channel's last n past streams: [{url, title, duration}]."""
     return [{"url": e.get("url") or e.get("webpage_url"), "title": e.get("title") or "", "duration": e.get("duration")}
-            for e in (d.get("entries") or [])[:n] if e.get("url") or e.get("webpage_url")]
+            for e in _flat(past_list_url(channel), n, "past streams")[:n] if e.get("url") or e.get("webpage_url")]
+
+
+def my_posts(channel, n=200):
+    """Your channel's latest Shorts (or TikTok videos) with views: [{title, views}]."""
+    c = (channel or "").strip()
+    m = re.match(r"^(?:https?://)?(?:www\.|m\.)?youtube\.com/(@[\w.-]+|channel/[\w-]+)", c)
+    if m:
+        c = f"https://www.youtube.com/{m.group(1)}/shorts"
+    elif not re.match(r"^(?:https?://)?(?:www\.)?tiktok\.com/@[\w.-]+", c):
+        raise ValueError("Paste your YouTube channel (https://www.youtube.com/@name) or TikTok (https://www.tiktok.com/@name).")
+    return [{"title": e.get("title") or e.get("description") or "", "views": int(e["view_count"])}
+            for e in _flat(c, n, "videos") if e.get("view_count") is not None]

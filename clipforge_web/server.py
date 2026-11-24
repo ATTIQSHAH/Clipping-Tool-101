@@ -6,7 +6,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from clipforge import ai, audiolib, source
+from clipforge import ai, audiolib, source, voice
 from clipforge.captions import TEMPLATES
 from clipforge.render import RES
 from clipforge.util import which
@@ -15,7 +15,7 @@ from . import db, engine, live, worker
 app = FastAPI(title="ClipForge")
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 EXTS = {".mp4", ".mov", ".mkv", ".webm"}
-CLIP_FIELDS = {"title", "template", "layout", "res", "crop_x", "music", "sfx_intro", "captions", "status", "sfx"}
+CLIP_FIELDS = {"title", "template", "layout", "res", "crop_x", "music", "sfx_intro", "captions", "status", "sfx", "views", "lang", "vo"}
 
 
 @app.on_event("startup")
@@ -24,6 +24,10 @@ def _start():
     db.ex("update videos set status='ready', stage='' where status='live'")      # live sessions don't survive a restart
     worker.start()
     live.start_watcher()
+    try:
+        audiolib.make_starter_sfx(which("ffmpeg"))   # adds any starter/meme sound that is missing
+    except Exception:
+        pass
 
 
 # ---------------- sign-in (one shared team password; set CLIPFORGE_PASSWORD to turn it on) ----------------
@@ -140,7 +144,8 @@ def health():
 @app.get("/api/settings")
 def get_settings():
     env = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    return {"ai": env or bool(db.setting("anthropic_key")), "ai_from_env": env, "model": db.setting("model", "base")}
+    return {"ai": env or bool(db.setting("anthropic_key")), "ai_from_env": env, "model": db.setting("model", "base"),
+            "my_channel": db.setting("my_channel"), "voice": voice.available(), "langs": ai.LANGS}
 
 
 @app.post("/api/settings")
@@ -150,6 +155,28 @@ def set_settings(body: dict = Body(...)):
     if body.get("model") in ("base", "small", "medium"):
         db.set_setting("model", body["model"])
     return get_settings()
+
+
+@app.get("/api/learn")
+def learn_state():
+    n = db.q("select count(*) n from clips where views is not null", one=True)["n"]
+    w = engine.learned()
+    return {"with_views": n, "need": engine.MIN_RESULTS,
+            "top": [engine.FEATS[k] for k in sorted(w, key=lambda k: -w[k])]}
+
+
+@app.post("/api/learn/fetch")
+def learn_fetch(body: dict = Body(...)):
+    """Read your channel's Shorts views and give them to the clips with the same title."""
+    ch = str(body.get("channel") or "").strip()
+    try:
+        posts = source.my_posts(ch)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, str(e)[:300])
+    db.set_setting("my_channel", ch)
+    return dict(learn_state(), posts=len(posts), matched=engine.match_views(posts))
 
 
 @app.post("/api/settings/test")
@@ -499,6 +526,15 @@ def patch_clip(cid: int, body: dict = Body(...)):
             raise HTTPException(400, f"'{val}' isn't in the audio library.")
         if k == "sfx":
             val = db.dumps(_clean_sfx(val))
+        if k == "views":
+            try:
+                val = None if val in (None, "") else max(0, int(val))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Views must be a number.")
+        if k == "lang" and val and val not in ai.LANGS:
+            raise HTTPException(400, "Unknown language.")
+        if k == "vo":
+            val = str(val or "").strip()[:300]
         sets.append(f"{k}=?")
         vals.append(val)
     if "start" in body or "end" in body:
@@ -516,7 +552,7 @@ def patch_clip(cid: int, body: dict = Body(...)):
         vals += [round(s, 3), round(e, 3)]
     if not sets:
         return _clip_out(c)
-    if any(not x.startswith(("status", "title")) for x in sets) and c["render_status"] == "done":
+    if any(not x.startswith(("status", "title", "views")) for x in sets) and c["render_status"] == "done":
         sets.append("render_status='stale'")
     db.ex(f"update clips set {','.join(sets)} where id=?", vals + [cid])
     return _clip_out(_clip(cid))

@@ -37,8 +37,17 @@ A yellow bar at the top tells you if something is missing.
 ## Good to know
 - Platforms have no "likes" on live streams. ClipForge uses chat bursts (Twitch), crowd/streamer volume and
   reaction words ("clip that", "no way") instead. If a stream drops or freezes (Kick does this), recording reconnects by itself.
-- Optional GTA banner reading (WASTED, BUSTED, MISSION FAILED boost a moment; chases and crashes are labelled):
-  pip install --no-deps -r requirements-vision.txt. Adds about 1 minute per hour of video.
+- Optional extras: pip install --no-deps -r requirements-extras.txt (Install-Windows.bat does it for you).
+  - GTA banner reading: WASTED, BUSTED, MISSION FAILED boost a moment; chases and crashes are labelled. Adds about
+    1 minute per hour of video.
+  - Voice-over: type a line in the clip editor and a computer voice reads it at the start (offline; each language's
+    voice downloads once, about 100 MB).
+- Translated captions: pick a caption language in the clip editor (needs the AI key; the captions are sent to Anthropic).
+- Meme sounds (airhorn, sad trombone, record scratch, vine boom) are in the sound effects. Auto-add puts a sad
+  trombone on WASTED/BUSTED and an airhorn on MISSION PASSED.
+- Learn from your results: post clips with their ClipForge title, then in Settings paste your YouTube or TikTok channel
+  and press Get views (or type views into each clip). After 6 clips have views, new clips that look like your best
+  ones rank higher.
 - Kick video needs Chrome or Edge installed (Streamlink opens it briefly to get the stream).
 - Only clip streams/videos you have the right to use.
 - 2K/4K rendering is slow on a laptop. Clips are only made when you approve them, so nothing is wasted.

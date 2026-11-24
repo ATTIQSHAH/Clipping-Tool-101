@@ -74,6 +74,8 @@
       <select id="s_model"><option value="base">Fast (base)</option><option value="small">Better (small)</option><option value="medium">Best, slow (medium)</option></select></div>
     <div><label for="s_key">AI scoring key (optional)</label><input id="s_key" type="password" placeholder="Anthropic API key" autocomplete="off">
       <p class="muted small" style="margin:6px 0 0">With a key, an AI editor also reads each clip's transcript to judge humor, surprise and whether the clip is complete. The transcripts are sent to Anthropic. Without a key the built-in scoring is used.</p></div>
+    <div><label for="s_chan">Learn from your channel</label><div class="row"><input id="s_chan" placeholder="https://www.youtube.com/@yourchannel"><button id="s_fetch" class="fit">Get views</button></div>
+      <p id="s_learn" class="muted small" style="margin:6px 0 0"></p></div>
     <p id="s_state" class="small"></p>
     <div class="row"><button id="s_save" class="primary">Save</button><button id="s_test">Test key</button><button id="s_close" class="ghost">Close</button></div>
   </div>
@@ -366,6 +368,7 @@ async function pollLive(){
 /* ---------------- editor ---------------- */
 function showEditor(on){$('#app').classList.toggle('noedit',!on);if(!on)$('#editor').innerHTML=''}
 async function selectClip(id){
+  if(!S.settings.langs)S.settings=await api('/api/settings');
   S.cid=id;S.clip=await api('/api/clips/'+id);S.framing=null;await loadCues();showEditor(true);buildEditor();drawCands();drawMap();loadFraming();
 }
 async function loadCues(){S.cues=await api('/api/clips/'+S.cid+'/cues')}
@@ -426,6 +429,10 @@ function buildEditor(){
      <button id="camEdit" class="fit" style="margin-top:8px" hidden>Adjust facecam box</button></div>
    <div><label>Caption style</label><div class="styles" id="tpls"></div>
      <label style="margin-top:8px"><input type="checkbox" id="capon" ${c.captions?'checked':''}> Burn captions into the video</label></div>
+   <div><label for="lang">Caption language</label><select id="lang"><option value="">As spoken</option>${Object.entries(S.settings.langs||{}).map(([k,n])=>`<option value="${k}" ${c.lang===k?'selected':''}>${esc(n)}</option>`).join('')}</select>
+     <p class="muted small" style="margin:6px 0 0">${S.settings.ai?'Translated by the AI editor when the clip is made. The preview shows the spoken words.':'Needs an AI key in Settings.'}</p></div>
+   <div><label for="vo">Voice-over (read aloud at the start)</label><div class="row"><input id="vo" value="${esc(c.vo||'')}" placeholder="Bro got WASTED in 2 seconds"><button id="voTitle" class="fit">Use title</button></div>
+     <p class="muted small" style="margin:6px 0 0">${S.settings.voice?'A computer voice reads it in the caption language. The game sound gets quieter while it talks.':'Install requirements-extras.txt to turn voice-over on.'}</p></div>
    <div><label>Quality</label><div class="seg" id="res"><button data-r="1080">1080p</button><button data-r="1440">2K</button><button data-r="2160">4K</button></div></div>
    <div class="row"><div><label for="music">Music</label><select id="music">${optList(S.audio.music,c.music,'None')}</select></div>
      <div><label for="sfx1">Intro sound</label><select id="sfx1">${optList(S.audio.sfx,c.sfx_intro,'None')}</select></div></div>
@@ -440,6 +447,8 @@ function buildEditor(){
    <div id="qcbox"></div>
    <div><label for="post">Post text</label><textarea id="post" rows="5" placeholder="Loading…"></textarea>
      <div class="row" style="margin-top:6px"><button id="postCopy" class="fit">Copy post text</button><button id="cover" class="fit" hidden>Download cover picture</button></div></div>
+   <div><label for="views">Views after posting</label><input id="views" type="number" min="0" value="${c.views??''}" placeholder="Type them in, or get them in Settings">
+     <p class="muted small" style="margin:6px 0 0">ClipForge learns from your best clips and ranks new ones like them.</p></div>
    <hr><h2>Captions</h2><p class="muted small" style="margin:2px 0 0">Fix any word. Timing stays with the words you keep.</p><div id="cues"></div>
   </div><div class="edfoot"><button id="reject" class="ghost">Reject</button><button id="approve" class="primary"><i class="fill"></i><span></span></button></div></div>`;
   $('#tpls').innerHTML=Object.entries(S.tpl).map(([n,t])=>`<button class="style ${n===c.template?'on':''}" data-t="${n}"><span class="s" style="color:${t.active};text-shadow:${t.box?'none':tplShadow(t,.08)};${t.box?'background:#000b;border-radius:4px;padding:0 4px':''}">${t.upper?'WORD':'Word'}</span><small>${n.replace(/_/g,' ')}</small></button>`).join('');
@@ -460,6 +469,10 @@ function buildEditor(){
   $('#approve').onclick=guard(()=>approve(S.cid));
   $('#reject').onclick=guard(()=>save({status:'rejected'}).then(()=>toast('Rejected.')));
   $('#title').onchange=guard(e=>save({title:e.target.value}));
+  $('#lang').onchange=guard(e=>save({lang:e.target.value}));
+  $('#vo').onchange=guard(e=>save({vo:e.target.value}));
+  $('#voTitle').onclick=guard(async()=>{$('#vo').value=S.clip.title;await save({vo:S.clip.title})});
+  $('#views').onchange=guard(e=>save({views:e.target.value}));
   $('#st').onchange=guard(()=>setTimes(+$('#st').value,+$('#en').value));$('#en').onchange=guard(()=>setTimes(+$('#st').value,+$('#en').value));
   $('#stNow').onclick=guard(()=>setTimes(v.currentTime,S.clip.end));$('#enNow').onclick=guard(()=>setTimes(S.clip.start,v.currentTime));
   el.querySelectorAll('[data-n]').forEach(b=>b.onclick=guard(()=>{const [k,d]=b.dataset.n.split(':');k==='st'?setTimes(S.clip.start+ +d,S.clip.end):setTimes(S.clip.start,S.clip.end+ +d)}));
@@ -589,8 +602,15 @@ window.addEventListener('resize',()=>{sizePhone();drawCaption();if($('#mapbox'))
 
 /* ---------------- settings ---------------- */
 $('#setBtn').onclick=guard(async()=>{S.settings=await api('/api/settings');$('#s_model').value=S.settings.model;$('#s_key').value='';
+  $('#s_chan').value=S.settings.my_channel||'';api('/api/learn').then(r=>$('#s_learn').textContent=learnText(r)).catch(()=>{});
   $('#s_state').textContent=S.settings.ai?(S.settings.ai_from_env?'AI scoring is on (key from the computer settings).':'AI scoring is on.'):'AI scoring is off.';$('#settings').showModal()});
 $('#s_close').onclick=()=>$('#settings').close();
+const learnText=r=>r.top.length?`Learned from ${r.with_views} clips. Your best ones had: ${r.top.join(', ')}. New clips are ranked with this.`
+  :r.with_views<r.need?`${r.with_views} of ${r.need} clips have views. Post clips with their ClipForge title, then get views here (or type them in each clip).`
+  :`${r.with_views} clips have views. No clear pattern yet.`;
+$('#s_fetch').onclick=guard(async()=>{$('#s_learn').textContent='Reading your channel…';
+  try{const r=await send('POST','/api/learn/fetch',{channel:$('#s_chan').value});$('#s_learn').textContent=`Found ${r.posts} posts, matched ${r.matched} to your clips. `+learnText(r)}
+  catch(e){$('#s_learn').textContent=e.message}});
 $('#s_save').onclick=guard(async()=>{const b={model:$('#s_model').value};if($('#s_key').value.trim())b.anthropic_key=$('#s_key').value.trim();
   S.settings=await send('POST','/api/settings',b);$('#s_key').value='';$('#s_state').textContent=S.settings.ai?'Saved. AI scoring is on.':'Saved. AI scoring is off.'});
 $('#s_test').onclick=guard(async()=>{$('#s_state').textContent='Testing…';try{await send('POST','/api/settings/test');$('#s_state').textContent='The key works.'}catch(e){$('#s_state').textContent=e.message}});
