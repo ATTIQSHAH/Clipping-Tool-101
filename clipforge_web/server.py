@@ -448,6 +448,29 @@ def auto_sfx(cid: int):
     return _clip_out(_clip(cid))
 
 
+@app.post("/api/clips/{cid}/ask")
+def ask_edit(cid: int, body: dict = Body(...)):
+    """Change a clip in plain words ('end 2 s earlier', 'split layout'). Uses the AI editor when a key is set,
+    simple built-in rules otherwise. Returns the clip and what changed."""
+    c = _clip(cid)
+    ask = str(body.get("text") or "").strip()
+    if not ask:
+        raise HTTPException(400, "Say what to change, like 'end 2 s earlier'.")
+    state = {k: c[k] for k in ai.EDIT_KEYS}
+    patch, key = ai.rule_edit(ask, state), engine.ai_key()
+    if key and not patch:
+        words = [w for w in json.loads(c["words"] or "[]") if c["start"] - 15 <= w["start"] <= c["end"] + 15]
+        try:
+            patch = ai.plan_edit(key, ask, state, words, list(TEMPLATES))
+        except Exception as e:
+            raise HTTPException(502, f"The AI editor didn't answer ({str(e)[:120]}).")
+    if not patch:
+        raise HTTPException(400, "I didn't understand that. Try 'end 2 s earlier', 'start 3 s later', 'title: ...', "
+                                 "'split layout', 'no captions' or '4k'." + ("" if key else " Add an AI key in Settings "
+                                                                              "for any other request."))
+    return {"changed": patch, "clip": patch_clip(cid, patch)}
+
+
 @app.patch("/api/clips/{cid}")
 def patch_clip(cid: int, body: dict = Body(...)):
     c = _clip(cid)
