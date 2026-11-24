@@ -39,6 +39,10 @@
       <input id="files" type="file" accept="video/*,.mkv" multiple hidden>
       <div id="uploads"></div>
       <p class="muted small" style="margin:0">Clips are found automatically. 100 clips from a 20-minute video works at about 12 seconds each.</p>
+      <details id="pastBox"><summary class="muted small" style="cursor:pointer">Missed a live? Past streams of a channel</summary>
+        <div class="stack" style="margin-top:8px">
+          <div class="row"><input id="pastUrl" placeholder="twitch.tv/name or youtube.com/@name"><button id="pastGo" class="fit">Show</button></div>
+          <div id="pastList" class="stack"></div></div></details>
     </div>
 
     <div class="card stack">
@@ -135,6 +139,12 @@ $('#addLinks').onclick=guard(async()=>{
   const r=await send('POST','/api/videos/link',{urls,max_height:+$('#quality').value.replace('q',''),quick:$('#quality').value[0]==='q',client_id:S.client,clips:+$('#a_clips').value,length:+$('#a_len').value});
   $('#links').value='';await tick();selectVideo(r.ids[0]);
 });
+$('#pastGo').onclick=guard(async()=>{
+  const box=$('#pastList');box.innerHTML='<p class="muted small" style="margin:0">Looking…</p>';
+  try{const l=await api('/api/past?url='+encodeURIComponent($('#pastUrl').value.trim()));
+    box.innerHTML=l.length?l.map((p,i)=>`<div class="row" style="align-items:center"><div style="flex:1;min-width:0"><div class="small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.title)}</div><div class="muted small">${p.duration?fmtLong(p.duration):''}</div></div><button class="fit" data-p="${i}">Make clips</button></div>`).join(''):'<p class="muted small" style="margin:0">No past streams found.</p>';
+    box.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{$('#links').value=l[+b.dataset.p].url;$('#addLinks').click()});
+  }catch(e){box.innerHTML='';throw e}});
 $('#pick').onclick=()=>$('#files').click();
 $('#files').onchange=e=>{[...e.target.files].forEach(uploadFile);e.target.value=''};
 function uploadFile(f){

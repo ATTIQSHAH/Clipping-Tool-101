@@ -6,7 +6,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from clipforge import ai, audiolib
+from clipforge import ai, audiolib, source
 from clipforge.captions import TEMPLATES
 from clipforge.render import RES
 from clipforge.util import which
@@ -261,6 +261,17 @@ def patch_video(vid: int, body: dict = Body(...)):
     db.ex("update videos set cam_box=? where id=?", (box, vid))
     db.ex("update clips set render_status='stale' where video_id=? and render_status='done' and layout in ('pip','stack')", (vid,))
     return _video_out(_video(vid))
+
+
+@app.get("/api/past")
+def past(url: str):
+    """A channel's last 5 past streams, to make clips from a live you missed."""
+    try:
+        return source.past_streams(url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, str(e)[:300])
 
 
 @app.post("/api/videos/link")
