@@ -65,7 +65,7 @@ CORNER_BOX = {"tl": (0, 0, .35, .50), "tr": (.65, 0, .35, .50), "bl": (0, .45, .
 def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="follow", crop_x=0.5,
                 encoder="libx264", fps=30, res=1080, music=None, music_vol=0.18, duck=True, sfx=(),
                 track=None, hook_zoom=True, on_progress=None,
-                cam_zoom=1.0, cam_shape="rect", cam_pos="top", cam_pos_x=0.5, cam_pos_y=0.65, split_ratio=0.5,
+                cam_zoom=1.0, cam_size=1.0, cam_shape="rect", cam_pos="top", cam_pos_x=0.5, cam_pos_y=0.65, split_ratio=0.5,
                 cam_crop_x=0.5, cam_crop_y=0.5, cam_corner="tr", aspect_ratio="9:16",
                 game_zoom=1.0, crop_y=0.5, vo=None):
     base = int(res or 1080)
@@ -101,20 +101,25 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
     if cam:
         cx, cy, cw_, ch_ = cam
         cz = max(0.4, min(float(cam_zoom or 1.0), 3.0))
-        if cz != 1.0:
-            zw = int(cw_ / cz) // 2 * 2
-            zh = int(ch_ / cz) // 2 * 2
-            cx = max(0, min(cx + (cw_ - zw) // 2, w - zw)) // 2 * 2
-            cy = max(0, min(cy + (ch_ - zh) // 2, h - zh)) // 2 * 2
-            cw_, ch_ = zw, zh
-        cam = [cx, cy, cw_, ch_]
+        zw = max(16, min(w, int(cw_ / cz))) // 2 * 2
+        zh = max(16, min(h, int(ch_ / cz))) // 2 * 2
+        mid_x = cx + cw_ // 2
+        mid_y = cy + ch_ // 2
+        px_c = max(0.0, min(1.0, float(cam_crop_x if cam_crop_x is not None else 0.5)))
+        py_c = max(0.0, min(1.0, float(cam_crop_y if cam_crop_y is not None else 0.5)))
+        shift_x = max(cw_, zw) * 0.8
+        shift_y = max(ch_, zh) * 0.8
+        scx = int(min(max(mid_x - zw // 2 + (px_c - 0.5) * 2 * shift_x, 0), w - zw)) // 2 * 2
+        scy = int(min(max(mid_y - zh // 2 + (py_c - 0.5) * 2 * shift_y, 0), h - zh)) // 2 * 2
+        cam = [scx, scy, zw, zh]
 
     target_ratio = W / H
     is_pip = layout == "pip"
     if is_pip and cam and w / h > target_ratio + 0.01:
         from .faces import PIP_SIZE, PIP_TOP
         cx, cy, cw_, ch_ = cam
-        pw = int(min(W, H) * (PIP_SIZE if aspect == "9:16" else 0.38)) // 2 * 2
+        cs = max(0.4, min(float(cam_size or 1.0), 2.5))
+        pw = int(min(W, H) * (PIP_SIZE if aspect == "9:16" else 0.38) * cs) // 2 * 2
         ph = int(pw * ch_ / cw_) // 2 * 2
         
         # Position calculation
@@ -189,10 +194,14 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
             scw = max(32, min(w, int(cw_ / cz))) // 2 * 2
             sch = max(32, min(h, int(scw / top_aspect))) // 2 * 2
 
+        mid_x = cx + cw_ // 2
+        mid_y = cy + ch_ // 2
         px_c = max(0.0, min(1.0, float(cam_crop_x if cam_crop_x is not None else 0.5)))
         py_c = max(0.0, min(1.0, float(cam_crop_y if cam_crop_y is not None else 0.5)))
-        scx = int(min(max(cx + (cw_ - scw) * px_c, 0), w - scw)) // 2 * 2
-        scy = int(min(max(cy + (ch_ - sch) * py_c, 0), h - sch)) // 2 * 2
+        shift_x = max(cw_, scw) * 0.8
+        shift_y = max(ch_, sch) * 0.8
+        scx = int(min(max(mid_x - scw // 2 + (px_c - 0.5) * 2 * shift_x, 0), w - scw)) // 2 * 2
+        scy = int(min(max(mid_y - sch // 2 + (py_c - 0.5) * 2 * shift_y, 0), h - sch)) // 2 * 2
 
         # Enhance upscaled webcam/streamer crop with unsharp filter for crisp facial detail
         cam_filter = f"scale={W}:{th}:flags=lanczos,unsharp=5:5:0.7:5:5:0.0"

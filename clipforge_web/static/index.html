@@ -513,12 +513,13 @@ function camEditor(){
   let initial = f.box || (S.video && S.video.cam_box ? JSON.parse(S.video.cam_box) : null) || [Math.round(vw * 0.65), 0, Math.round(vw * 0.35), Math.round(vh * 0.45)];
   let b = initial.map(n => n * k), drag = null;
   const m = document.createElement('div'); m.className = 'modal';
+  m.style.zIndex = '2500';
   m.innerHTML = `<div class="mbox" style="max-width:940px">
     <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
       <h2 style="margin:0">🎯 Select Streamer Reaction Box</h2>
       <button id="camCloseX" class="ghost" style="font-size:16px">✕</button>
     </div>
-    <p class="muted small" style="margin:0 0 10px">Drag the blue box over the streamer's reaction camera in the video. Drag the corner dot to resize.</p>
+    <p class="muted small" style="margin:0 0 10px">Drag the blue box over the streamer's reaction camera in the video. Drag any corner (⚪) or edge to resize.</p>
     <div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap">
       <span class="small" style="font-weight:700;display:flex;align-items:center">Presets:</span>
       <button class="small" id="camSetTL">↖ Top-Left</button>
@@ -547,35 +548,115 @@ function camEditor(){
     g.strokeStyle = '#8c9bff';
     g.lineWidth = 2.5;
     g.strokeRect(b[0], b[1], b[2], b[3]);
-    g.fillStyle = '#8c9bff';
+    
+    // Draw 4 corner handles
+    const corners = [
+      [b[0], b[1]],
+      [b[0] + b[2], b[1]],
+      [b[0], b[1] + b[3]],
+      [b[0] + b[2], b[1] + b[3]]
+    ];
+    corners.forEach(([cx, cy]) => {
+      g.fillStyle = '#ffffff';
+      g.beginPath();
+      g.arc(cx, cy, 7, 0, Math.PI * 2);
+      g.fill();
+      g.strokeStyle = '#6366f1';
+      g.lineWidth = 2;
+      g.stroke();
+    });
+
+    // Draw edge center grips
+    const edges = [
+      [b[0] + b[2] / 2, b[1]],
+      [b[0] + b[2] / 2, b[1] + b[3]],
+      [b[0], b[1] + b[3] / 2],
+      [b[0] + b[2], b[1] + b[3] / 2]
+    ];
+    edges.forEach(([ex, ey]) => {
+      g.fillStyle = '#6366f1';
+      g.beginPath();
+      g.arc(ex, ey, 4.5, 0, Math.PI * 2);
+      g.fill();
+    });
+
+    // Dimensions badge
+    const origW = Math.round(b[2] / k), origH = Math.round(b[3] / k);
+    g.fillStyle = '#0f1424ee';
     g.beginPath();
-    g.arc(b[0] + b[2], b[1] + b[3], 9, 0, Math.PI * 2);
+    if(typeof g.roundRect === 'function'){
+      g.roundRect(b[0] + 4, b[1] + 4, 130, 22, 4);
+    } else {
+      g.rect(b[0] + 4, b[1] + 4, 130, 22);
+    }
     g.fill();
     g.fillStyle = '#fff';
     g.font = 'bold 11px sans-serif';
-    g.fillText('Streamer Cam', b[0] + 6, b[1] + 16);
+    g.fillText(`Streamer: ${origW}×${origH}`, b[0] + 10, b[1] + 19);
   };
+
   const pt = e => {
     const r = cv.getBoundingClientRect();
     return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height];
   };
+
+  const hitHandle = (x, y) => {
+    const tol = 16;
+    if(Math.hypot(x - b[0], y - b[1]) <= tol) return 'tl';
+    if(Math.hypot(x - (b[0] + b[2]), y - b[1]) <= tol) return 'tr';
+    if(Math.hypot(x - b[0], y - (b[1] + b[3])) <= tol) return 'bl';
+    if(Math.hypot(x - (b[0] + b[2]), y - (b[1] + b[3])) <= tol) return 'br';
+    if(Math.abs(y - b[1]) <= tol && x >= b[0] && x <= b[0] + b[2]) return 't';
+    if(Math.abs(y - (b[1] + b[3])) <= tol && x >= b[0] && x <= b[0] + b[2]) return 'b';
+    if(Math.abs(x - b[0]) <= tol && y >= b[1] && y <= b[1] + b[3]) return 'l';
+    if(Math.abs(x - (b[0] + b[2])) <= tol && y >= b[1] && y <= b[1] + b[3]) return 'r';
+    if(x > b[0] && x < b[0] + b[2] && y > b[1] && y < b[1] + b[3]) return 'move';
+    return null;
+  };
+
   cv.onpointerdown = e => {
     const [x, y] = pt(e);
     cv.setPointerCapture(e.pointerId);
-    drag = Math.hypot(x - b[0] - b[2], y - b[1] - b[3]) < 20 ? { rs: 1 } : (x > b[0] && x < b[0] + b[2] && y > b[1] && y < b[1] + b[3]) ? { dx: x - b[0], dy: y - b[1] } : null;
-  };
-  cv.onpointermove = e => {
-    if (!drag) return;
-    const [x, y] = pt(e), min = 32 * k;
-    if (drag.rs) {
-      b[2] = Math.min(Math.max(x - b[0], min), W - b[0]);
-      b[3] = Math.min(Math.max(y - b[1], min), H - b[1]);
+    const h = hitHandle(x, y);
+    if(h === 'move'){
+      drag = { type: 'move', dx: x - b[0], dy: y - b[1] };
+    } else if(h){
+      drag = { type: 'resize', handle: h, ox: b[0], oy: b[1], ow: b[2], oh: b[3], startX: x, startY: y };
     } else {
+      b = [x, y, 40 * k, 40 * k];
+      drag = { type: 'resize', handle: 'br', ox: x, oy: y, ow: 0, oh: 0, startX: x, startY: y };
+      draw();
+    }
+  };
+
+  cv.onpointermove = e => {
+    const [x, y] = pt(e);
+    if (!drag) {
+      const h = hitHandle(x, y);
+      if(h === 'tl' || h === 'br') cv.style.cursor = 'nwse-resize';
+      else if(h === 'tr' || h === 'bl') cv.style.cursor = 'nesw-resize';
+      else if(h === 't' || h === 'b') cv.style.cursor = 'ns-resize';
+      else if(h === 'l' || h === 'r') cv.style.cursor = 'ew-resize';
+      else if(h === 'move') cv.style.cursor = 'move';
+      else cv.style.cursor = 'crosshair';
+      return;
+    }
+    const min = 32 * k;
+    if(drag.type === 'move'){
       b[0] = Math.min(Math.max(x - drag.dx, 0), W - b[2]);
       b[1] = Math.min(Math.max(y - drag.dy, 0), H - b[3]);
+    } else if(drag.type === 'resize'){
+      const d = drag;
+      let left = d.ox, top = d.oy, right = d.ox + d.ow, bottom = d.oy + d.oh;
+      if(d.handle.includes('l')) left = Math.min(Math.max(0, x), right - min);
+      if(d.handle.includes('r')) right = Math.max(Math.min(W, x), left + min);
+      if(d.handle.includes('t')) top = Math.min(Math.max(0, y), bottom - min);
+      if(d.handle.includes('b')) bottom = Math.max(Math.min(H, y), top + min);
+      b[0] = left; b[1] = top; b[2] = right - left; b[3] = bottom - top;
     }
     draw();
   };
+
   cv.onpointerup = () => drag = null;
 
   m.querySelector('#camSetTL').onclick = () => { b = [0, 0, W * 0.35, H * 0.50]; draw(); };
@@ -733,6 +814,20 @@ function buildEditor(){
               <button data-shape="rect" class="${(c.cam_shape||'rect')==='rect'?'on':''}">⬛ Rectangle Frame</button>
               <button data-shape="circle" class="${c.cam_shape==='circle'?'on':''}">⭕ Circle Frame</button>
             </div>
+          </div>
+
+          <!-- Floating Camera Size (for PiP / Floating Cam) -->
+          <div id="camSizeCard" class="card" style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px;${c.layout==='pip'?'':'display:none'}">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0;font-weight:700">Floating Cam Size: <b id="camSizeVal" style="color:var(--accent)">${Math.round((c.cam_size || 1.0) * 100)}%</b></label>
+              <div class="row fit" style="gap:4px">
+                <button id="camSizeMinus" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Smaller cam">🔍−</button>
+                <button id="camSizeReset" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Reset cam size">1.0x</button>
+                <button id="camSizePlus" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Larger cam">🔍+</button>
+              </div>
+            </div>
+            <input id="camSize" type="range" min="0.4" max="2.2" step="0.05" value="${c.cam_size || 1.0}">
+            <div class="row muted small"><span>0.4x Mini</span><span style="flex:1;text-align:center">1.0x Normal</span><span>2.2x Large</span></div>
           </div>
 
           <!-- Gameplay Screen Zoom & Pan Controls -->
@@ -1259,6 +1354,28 @@ function buildEditor(){
     panYInp.onchange=guard(e=>save({cam_crop_y: +e.target.value}));
   }
 
+  // Floating Cam Size Controls
+  const camSizeInp=$('#camSize'), camSizeVal=$('#camSizeVal');
+  const updateCamSize = async val => {
+    val = Math.round(Math.max(0.4, Math.min(2.2, val)) * 100) / 100;
+    S.clip.cam_size = val;
+    if(camSizeInp) camSizeInp.value = val;
+    if(camSizeVal) camSizeVal.textContent = Math.round(val * 100) + '%';
+    applyLayout();
+    await save({cam_size: val});
+  };
+  if(camSizeInp){
+    camSizeInp.oninput=e=>{
+      S.clip.cam_size = +e.target.value;
+      if(camSizeVal) camSizeVal.textContent = Math.round(S.clip.cam_size * 100) + '%';
+      applyLayout();
+    };
+    camSizeInp.onchange=guard(e=>updateCamSize(+e.target.value));
+  }
+  if($('#camSizeIn') || $('#camSizePlus')) ($('#camSizePlus')||$('#camSizeIn')).onclick=guard(()=>updateCamSize((S.clip.cam_size||1.0)+0.1));
+  if($('#camSizeOut') || $('#camSizeMinus')) ($('#camSizeMinus')||$('#camSizeOut')).onclick=guard(()=>updateCamSize((S.clip.cam_size||1.0)-0.1));
+  if($('#camSizeReset')) $('#camSizeReset').onclick=guard(()=>updateCamSize(1.0));
+
   // Gameplay Screen Zoom Controls
   const gameZoomInp=$('#gameZoom'), gameZoomVal=$('#gameZoomVal');
   const updateGameZoom = async val => {
@@ -1627,6 +1744,21 @@ function initCanvasDrag(){
 
     if(c.layout === 'pip' && S.camBox){
       const b=S.camBox;
+      if(Math.hypot(mx - (b.x + b.w), my - (b.y + b.h)) <= 18){
+        cv.setPointerCapture(e.pointerId);
+        S.canvasDrag = {
+          mode: 'pip_resize',
+          startX: mx,
+          startY: my,
+          initialW: b.w,
+          initialScale: c.cam_size || 1.0,
+          baseW: b.baseW || Math.round(W * ((c.cam_shape || 'rect') === 'circle' ? 0.44 : 0.48)),
+          moved: false
+        };
+        cv.style.cursor = 'nwse-resize';
+        e.preventDefault();
+        return;
+      }
       let inside = false;
       if(b.shape==='circle'){
         inside = Math.hypot(mx-(b.x+b.w/2), my-(b.y+b.h/2)) <= Math.min(b.w,b.h)/2+10;
@@ -1694,8 +1826,11 @@ function initCanvasDrag(){
       if(d.mode === 'cam_pan'){
         const dx = (mx - d.startX) / W;
         const dy = (my - d.startY) / (H * (c.split_ratio || 0.5));
-        c.cam_crop_x = Math.max(0, Math.min(1, d.initialX - dx * 0.8));
-        c.cam_crop_y = Math.max(0, Math.min(1, d.initialY - dy * 0.8));
+        c.cam_crop_x = Math.max(0, Math.min(1, +(d.initialX - dx * 0.8).toFixed(3)));
+        c.cam_crop_y = Math.max(0, Math.min(1, +(d.initialY - dy * 0.8).toFixed(3)));
+        const pxInp = $('#camPanX'), pyInp = $('#camPanY');
+        if(pxInp) pxInp.value = c.cam_crop_x;
+        if(pyInp) pyInp.value = c.cam_crop_y;
         applyLayout();
         return;
       }
@@ -1722,6 +1857,17 @@ function initCanvasDrag(){
         applyLayout();
         return;
       }
+
+      if(d.mode === 'pip_resize'){
+        const dw = mx - d.startX;
+        const newW = Math.max(60, Math.min(W * 0.95, d.initialW + dw));
+        c.cam_size = Math.max(0.4, Math.min(2.2, +(newW / d.baseW).toFixed(2)));
+        const sInp = $('#camSize'), sVal = $('#camSizeVal');
+        if(sInp) sInp.value = c.cam_size;
+        if(sVal) sVal.textContent = Math.round(c.cam_size * 100) + '%';
+        applyLayout();
+        return;
+      }
     }
 
     // Hover cursor feedback
@@ -1739,6 +1885,10 @@ function initCanvasDrag(){
 
     if(c.layout === 'pip' && S.camBox){
       const b=S.camBox;
+      if(Math.hypot(mx - (b.x + b.w), my - (b.y + b.h)) <= 18){
+        cv.style.cursor = 'nwse-resize';
+        return;
+      }
       let inside = false;
       if(b.shape==='circle'){
         inside = Math.hypot(mx-(b.x+b.w/2), my-(b.y+b.h/2)) <= Math.min(b.w,b.h)/2+10;
@@ -1775,6 +1925,9 @@ function initCanvasDrag(){
           layout: 'pip'
         });
         toast('Streamer camera placed.');
+      } else if(d.mode === 'pip_resize'){
+        await save({ cam_size: S.clip.cam_size });
+        toast('Floating camera resized.');
       }
     }
   };
@@ -1784,6 +1937,7 @@ function initCanvasDrag(){
     if(!S.clip) return;
     e.preventDefault();
     const r = cv.getBoundingClientRect();
+    const mx = (e.clientX - r.left) * (cv.width / r.width);
     const my = (e.clientY - r.top) * (cv.height / r.height);
     const c = S.clip, H = cv.height;
     const delta = e.deltaY < 0 ? 0.08 : -0.08;
@@ -1792,6 +1946,29 @@ function initCanvasDrag(){
       const _btm = new Set(['bottom','bl','br','bc']);
       const isStreamer = !_btm.has(c.cam_pos) ? (my < th) : (my > th);
       if(isStreamer){
+        c.cam_zoom = Math.round(Math.max(0.4, Math.min(3.0, (c.cam_zoom || 1.0) + delta)) * 100) / 100;
+        const inp = $('#camZoom'), val = $('#zoomVal');
+        if(inp) inp.value = c.cam_zoom;
+        if(val) val.textContent = Math.round(c.cam_zoom * 100) + '%';
+        applyLayout();
+        await save({ cam_zoom: c.cam_zoom });
+      } else {
+        c.game_zoom = Math.round(Math.max(0.4, Math.min(3.0, (c.game_zoom || 1.0) + delta)) * 100) / 100;
+        const inp = $('#gameZoom'), val = $('#gameZoomVal');
+        if(inp) inp.value = c.game_zoom;
+        if(val) val.textContent = Math.round(c.game_zoom * 100) + '%';
+        applyLayout();
+        await save({ game_zoom: c.game_zoom });
+      }
+    } else if(c.layout === 'pip' && S.camBox){
+      const b = S.camBox;
+      let overCam = false;
+      if(b.shape === 'circle'){
+        overCam = Math.hypot(mx - (b.x + b.w / 2), my - (b.y + b.h / 2)) <= Math.min(b.w, b.h) / 2 + 10;
+      } else {
+        overCam = mx >= b.x - 6 && mx <= b.x + b.w + 6 && my >= b.y - 6 && my <= b.y + b.h + 6;
+      }
+      if(overCam){
         c.cam_zoom = Math.round(Math.max(0.4, Math.min(3.0, (c.cam_zoom || 1.0) + delta)) * 100) / 100;
         const inp = $('#camZoom'), val = $('#zoomVal');
         if(inp) inp.value = c.cam_zoom;
@@ -2260,19 +2437,27 @@ function drawStack(v,f,c){
     g.drawImage(v, Math.max(0, (vw - ggw) * gpx), Math.max(0, (vh - ggh) * gpy), ggw, ggh, 0, 0, W, H);
 
     // 3. Floating Streamer Reaction Camera
-    const pw = Math.round(W * (shape === 'circle' ? 0.44 : 0.48));
+    const baseW = Math.round(W * (shape === 'circle' ? 0.44 : 0.48));
+    const camScale = Math.max(0.4, Math.min(2.5, c.cam_size || 1.0));
+    const pw = Math.round(baseW * camScale);
     const ph_cam = shape === 'circle' ? pw : Math.round(pw * (ch / cw));
     let px = Math.round((W - pw) * Math.max(0, Math.min(1, c.cam_pos_x ?? 0.5)));
     let py = Math.round((H - ph_cam) * Math.max(0, Math.min(1, c.cam_pos_y ?? 0.65)));
     if(c.cam_pos === 'pip_top') py = Math.round(H * 0.12);
     else if(c.cam_pos === 'pip_center') py = Math.round((H - ph_cam) / 2);
 
-    S.camBox = { x: px, y: py, w: pw, h: ph_cam, shape: shape };
+    S.camBox = { x: px, y: py, w: pw, h: ph_cam, shape: shape, baseW: baseW };
 
     const zw = Math.min(vw, cw / zoom);
     const zh = Math.min(vh, ch / zoom);
-    const zx = Math.max(0, Math.min(vw - zw, cx + cw/2 - zw/2));
-    const zy = Math.max(0, Math.min(vh - zh, cy + ch/2 - zh/2));
+    const midX = cx + cw / 2;
+    const midY = cy + ch / 2;
+    const panX = typeof c.cam_crop_x === 'number' ? c.cam_crop_x : 0.5;
+    const panY = typeof c.cam_crop_y === 'number' ? c.cam_crop_y : 0.5;
+    const shiftX = Math.max(cw, zw) * 0.8;
+    const shiftY = Math.max(ch, zh) * 0.8;
+    const zx = Math.max(0, Math.min(vw - zw, midX - zw / 2 + (panX - 0.5) * 2 * shiftX));
+    const zy = Math.max(0, Math.min(vh - zh, midY - zh / 2 + (panY - 0.5) * 2 * shiftY));
 
     g.save();
     if(shape === 'circle'){
@@ -2320,6 +2505,19 @@ function drawStack(v,f,c){
     g.font = 'bold 9.5px sans-serif';
     g.textAlign = 'center';
     g.fillText('✥ Drag Cam', px + pw/2, py + 16);
+
+    // Corner Resize Handle Grip (bottom-right)
+    g.fillStyle = '#6366f1';
+    g.beginPath();
+    g.arc(px + pw, py + ph_cam, 10, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 1.5;
+    g.stroke();
+    g.fillStyle = '#ffffff';
+    g.font = 'bold 9px sans-serif';
+    g.textAlign = 'center';
+    g.fillText('⤡', px + pw, py + ph_cam + 3);
     return;
   }
 
@@ -2363,10 +2561,14 @@ function drawStack(v,f,c){
     zw = Math.min(vw, cw / zoom);
     zh = Math.min(vh, zw / topAspect);
   }
+  const midX = cx + cw / 2;
+  const midY = cy + ch / 2;
   const panX = typeof c.cam_crop_x === 'number' ? c.cam_crop_x : 0.5;
   const panY = typeof c.cam_crop_y === 'number' ? c.cam_crop_y : 0.5;
-  const zx = Math.max(0, Math.min(vw - zw, cx + (cw - zw) * panX));
-  const zy = Math.max(0, Math.min(vh - zh, cy + (ch - zh) * panY));
+  const shiftX = Math.max(cw, zw) * 0.8;
+  const shiftY = Math.max(ch, zh) * 0.8;
+  const zx = Math.max(0, Math.min(vw - zw, midX - zw / 2 + (panX - 0.5) * 2 * shiftX));
+  const zy = Math.max(0, Math.min(vh - zh, midY - zh / 2 + (panY - 0.5) * 2 * shiftY));
 
   g.save();
   g.drawImage(v, zx, zy, zw, zh, 0, streamY, W, streamH);
@@ -2399,6 +2601,11 @@ function applyLayout(){
   const stack = isStackOrPip && v.videoWidth;
   const cv=$('#stackcv');
   const blur=v.videoWidth&&(c.layout==='blur'||(!isStackOrPip&&!['follow','crop'].includes(c.layout)));
+  
+  const camSizeCard = $('#camSizeCard');
+  if(camSizeCard) camSizeCard.style.display = (c.layout === 'pip') ? '' : 'none';
+  const dualSplitBox = $('#dualSplitBox');
+  if(dualSplitBox) dualSplitBox.style.display = (c.layout === 'stack') ? '' : 'none';
   
   if(!stack && !blur){
     if(cv) cv.hidden=true;
