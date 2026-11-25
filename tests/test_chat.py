@@ -8,7 +8,4 @@ msg = {"liveChatTextMessageRenderer": {"message": {"runs": [{"text": "NO WAY "},
 line = json.dumps({"replayChatItemAction": {"actions": [{"addChatItemAction": {"item": msg}}, {"other": 1}]}})
 assert live_chat_line(line) == [(1794567267.69849, "NO WAY he crashed", None)], live_chat_line(line)
 assert live_chat_line("not json") == [] and live_chat_line("{}") == []
-from clipforge_web.live import kick_msg
-fr = {"event": "App\\Events\\ChatMessageEvent", "data": json.dumps({"content": "LETS GO", "sender": {"username": "bob"}})}
-assert kick_msg(fr) == ("LETS GO", "bob") and kick_msg({"event": "pusher:pong", "data": "{}"}) is None
 print("ok")

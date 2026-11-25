@@ -2,6 +2,7 @@
 {"words": [{"w": "hello", "start": 0.12, "end": 0.40}, ...]}"""
 import json
 import os
+import subprocess
 import threading
 import wave
 
@@ -17,39 +18,67 @@ CHUNK, PAD = 600.0, 5.0      # long audio goes in 10-minute pieces so memory sta
 
 
 def _load_wav(path, start=0.0, end=None):
-    # Window files are 16 kHz mono 16-bit WAVs, so no extra decoder (PyAV) is needed.
-    with wave.open(path, "rb") as w:
-        sr, n = w.getframerate(), w.getnframes()
-        a, b = int(start * sr), n if end is None else min(n, int(end * sr))
-        w.setpos(min(a, n))
-        data = w.readframes(max(b - a, 0))
-    return np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+    try:
+        with wave.open(path, "rb") as w:
+            sr, n = w.getframerate(), w.getnframes()
+            a, b = int(start * sr), n if end is None else min(n, int(end * sr))
+            w.setpos(min(a, n))
+            data = w.readframes(max(b - a, 0))
+            if len(data):
+                return np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+    except Exception:
+        pass
+
+    from .util import which
+    ffmpeg = which("ffmpeg")
+    ss_args = ["-ss", f"{start:.3f}"] if start > 0 else []
+    t_args = ["-t", f"{(end - start):.3f}"] if end is not None else []
+    cmd = [ffmpeg, "-nostdin", "-v", "error"] + ss_args + t_args + ["-i", path, "-ar", "16000", "-ac", "1", "-f", "s16le", "-"]
+    raw = subprocess.run(cmd, capture_output=True).stdout
+    return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
 
 def wav_seconds(path):
-    with wave.open(path, "rb") as w:
-        return w.getnframes() / w.getframerate()
+    try:
+        with wave.open(path, "rb") as w:
+            return w.getnframes() / w.getframerate()
+    except Exception:
+        from .util import which, probe
+        try:
+            return float(probe(which("ffprobe"), path)["duration"])
+        except Exception:
+            return 0.0
 
 
-def transcribe_file(wav, model="small", device="cpu", compute="int8", language=None, on_progress=None):
+def transcribe_file(wav, model="base", device="cpu", compute="int8", language=None, on_progress=None,
+                    model_size=None, compute_type=None, should_stop=None):
     global _model, _loaded
+    if model_size:
+        model = model_size
+    if compute_type:
+        compute = compute_type
     if DEVICE:
         device, compute = DEVICE, ("int8" if DEVICE == "cpu" else "float16")
     with _lock:
         if _model is None or _loaded != (model, device, compute):   # reload when Settings change the accuracy
             from faster_whisper import WhisperModel
-            _model = WhisperModel(model, device=device, compute_type=compute)
+            # Cap cpu_threads so Whisper never starves the web server / OS event loop
+            cpu_threads = max(1, min(4, (os.cpu_count() or 4) // 2))
+            _model = WhisperModel(model, device=device, compute_type=compute, cpu_threads=cpu_threads, num_workers=1)
             _loaded = (model, device, compute)
     total = max(wav_seconds(wav), 0.1)
     words, pos = [], 0.0
     while pos < total:
-        # each piece reads PAD seconds extra on both sides; a word belongs to the piece it starts in
         off = max(pos - PAD, 0.0)
         audio = _load_wav(wav, off, pos + CHUNK + PAD)
         with _lock:
+            vad_params = dict(min_silence_duration_ms=350, speech_pad_ms=250)
             segs, _ = _model.transcribe(audio, word_timestamps=True, vad_filter=True,
+                                        vad_parameters=vad_params, beam_size=5,
                                         language=language, condition_on_previous_text=False)
             for s in segs:
+                if should_stop:
+                    should_stop()
                 if on_progress:
                     on_progress(min(1.0, (off + s.end) / total))
                 for w in (s.words or []):

@@ -12,42 +12,22 @@ A yellow bar at the top tells you if something is missing.
 - Up to 100 ranked clips per video, each with a score, the reason, a title and word-by-word captions.
   Rule of thumb: a 20-minute video fits about 100 clips at ~12 seconds each.
 - Vertical 9:16 output for Facebook Reels, YouTube Shorts and TikTok (1080x1920 by default).
-- Gaming layout (default): gameplay fills the frame and the streamer's facecam sits in a small box at the top centre.
-  "Facecam + gameplay split" puts the facecam in the top 40% instead. With no facecam the whole gameplay is
+- Gaming layout (default): the streamer's facecam on top, gameplay underneath. With no facecam the whole gameplay is
   shown over a blurred fill; with a full camera shot the crop follows the face.
 - Finds big on-screen action (crashes, explosions) from picture changes, plus GTA and gaming words in speech and chat.
 - YouTube links: the chat replay is downloaded automatically and used as a signal.
 - 8 caption styles, 1080p / 2K (1440x2560) / 4K (2160x3840), music, one sound effect.
 - Approve = the clip is made and downloads to your browser's Downloads folder automatically.
   (The first time, the browser may ask to allow multiple downloads - say yes.)
-- Go live: paste a Twitch, Kick or YouTube Live link. ClipForge records it, watches the sound and the chat,
+- Go live: paste a Twitch, Kick or YouTube Live link. ClipForge records it, watches the sound and (Twitch) chat,
   and cuts a clip whenever something big happens. "Clip it now" cuts the last moments by hand.
 - Watch list (under Go live): list the channels you follow, one link per line. ClipForge checks them every minute and
   starts recording when one goes live, and finishes by itself when the stream ends. Stopping a recording by hand keeps
   it stopped until that channel goes offline. At most 6 recordings run at once (set CLIPFORGE_MAX_LIVE to change it).
-- Sound effects in the clip editor: Auto-add places a whoosh at the start, a riser and boom on the big moment and
-  pops on reaction words; add any effect at the playhead and set its time and volume. 11 effects come built in
-  (made by FFmpeg, no copyright); drop your own files into audio_library/sfx.
-- Quick links (default): only a small 360p copy is downloaded to find the clips; each approved clip is then
-  fetched in full quality on its own (about 20 MB instead of GBs for a long stream). Pick "Full 1080p" to download
-  the whole video instead. If the link stops working, the clip is made from the quick copy.
-- Several videos are clipped at the same time: 3 tasks (download, find clips, render) run at once. Set
-  CLIPFORGE_WORKERS to change it. Speech-to-text still runs one video at a time to keep the computer responsive.
 
 ## Good to know
 - Platforms have no "likes" on live streams. ClipForge uses chat bursts (Twitch), crowd/streamer volume and
-  reaction words ("clip that", "no way") instead. If a stream drops or freezes (Kick does this), recording reconnects by itself.
-- Optional extras: pip install --no-deps -r requirements-extras.txt (Install-Windows.bat does it for you).
-  - GTA banner reading: WASTED, BUSTED, MISSION FAILED boost a moment; chases and crashes are labelled. Adds about
-    1 minute per hour of video.
-  - Voice-over: type a line in the clip editor and a computer voice reads it at the start (offline; each language's
-    voice downloads once, about 100 MB).
-- Translated captions: pick a caption language in the clip editor (needs the AI key; the captions are sent to Anthropic).
-- Meme sounds (airhorn, sad trombone, record scratch, vine boom) are in the sound effects. Auto-add puts a sad
-  trombone on WASTED/BUSTED and an airhorn on MISSION PASSED.
-- Learn from your results: post clips with their ClipForge title, then in Settings paste your YouTube or TikTok channel
-  and press Get views (or type views into each clip). After 6 clips have views, new clips that look like your best
-  ones rank higher.
+  reaction words ("clip that", "no way") instead. Kick and YouTube Live chat are not read live yet: they use sound and picture only.
 - Kick video needs Chrome or Edge installed (Streamlink opens it briefly to get the stream).
 - Only clip streams/videos you have the right to use.
 - 2K/4K rendering is slow on a laptop. Clips are only made when you approve them, so nothing is wasted.
@@ -62,4 +42,4 @@ server with a domain (Caddy gives HTTPS). Live Kick clipping needs a desktop bro
 Set CLIPFORGE_DEVICE=cuda to transcribe on an NVIDIA GPU (much faster when several streams run at once).
 
 ## Tests
-python tests/test_live_watch.py (needs FFmpeg, no internet). python tests/test_game.py for banner reading.
+python tests/test_live_watch.py (needs FFmpeg, no internet).

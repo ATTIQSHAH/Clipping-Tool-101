@@ -34,16 +34,38 @@ def ai_key():
     return os.environ.get("ANTHROPIC_API_KEY") or db.setting("anthropic_key")
 
 
-def clip_source(clip, video):
-    """Live moments are cut into their own small file; everything else comes from the video."""
-    return clip.get("src") or video["path"]
+def clip_source(clip, video=None):
+    """Live moments are cut into their own small file; prefer HD clip cut if available, else video file."""
+    if not clip and not video:
+        return ""
+    src = clip.get("src") if isinstance(clip, dict) else None
+    if src and os.path.exists(src):
+        return src
+    vid = (clip.get("video_id") if isinstance(clip, dict) else None) or (video.get("id") if isinstance(video, dict) else None)
+    vd = vdir(vid) if vid else None
+    cid = clip.get("id") if isinstance(clip, dict) else None
+    if cid and vd and os.path.isdir(vd):
+        for f in os.listdir(vd):
+            if f.startswith(f"hd_{cid}_") and f.endswith(".mp4"):
+                hd_path = os.path.join(vd, f)
+                if os.path.exists(hd_path) and os.path.getsize(hd_path) > 1000:
+                    return hd_path
+    vpath = video.get("path") if isinstance(video, dict) else None
+    if vpath and os.path.exists(vpath):
+        return vpath
+    if src and vd:
+        base = os.path.basename(src)
+        cand = os.path.join(vd, base)
+        if os.path.exists(cand):
+            return cand
+    if vd and os.path.isdir(vd):
+        for f in os.listdir(vd):
+            if f.endswith((".mp4", ".mkv", ".webm")) and not f.endswith(".info.json"):
+                return os.path.join(vd, f)
+    return vpath or src or ""
 
 
 # ---------------- import ----------------
-NO_SOUND = "This video has no sound, so ClipForge can't find its best moments."
-TOO_SHORT = "This video is too short. Use one that is at least 5 seconds long."
-
-
 def ingest(job, video_id, params):
     v = db.q("select * from videos where id=?", (video_id,), one=True)
     os.makedirs(vdir(video_id), exist_ok=True)
@@ -61,11 +83,29 @@ def ingest(job, video_id, params):
         title = (info or {}).get("title") or title
         if "youtube.com" in v["source"] or "youtu.be" in v["source"]:
             prog(video_id, 96, "Reading the chat replay")
-            events = youtube_chat(v["source"], os.path.splitext(path)[0], params.get("cookies_browser") or None)
-            if len(events) >= 20:
-                with open(os.path.join(wdir(video_id), "chat.txt"), "w", encoding="utf-8") as f:
-                    f.write("\n".join(f"{t:.2f} {m.replace(chr(10), ' ')}" for t, m in events))
-                job.log(f"Chat replay: {len(events)} messages.")
+            try:
+                chat_path = youtube_chat(v["source"], os.path.splitext(path)[0], params.get("cookies_browser") or None)
+                if chat_path and os.path.exists(chat_path):
+                    events = []
+                    with open(chat_path, "r", encoding="utf-8") as cf:
+                        for line in cf:
+                            try:
+                                d = json.loads(line)
+                                item = d.get("replayChatItemAction", {}).get("actions", [{}])[0]
+                                act = item.get("addChatItemAction", {}).get("item", {})
+                                msg_renderer = act.get("liveChatTextMessageRenderer", {})
+                                t = int(d.get("videoOffsetTimeMsec", 0)) / 1000.0
+                                msg = "".join(p.get("text", "") for p in msg_renderer.get("message", {}).get("runs", []))
+                                if msg:
+                                    events.append((t, msg))
+                            except Exception:
+                                pass
+                    if events and len(events) >= 20:
+                        with open(os.path.join(wdir(video_id), "chat.txt"), "w", encoding="utf-8") as cf:
+                            cf.write("\n".join(f"{t:.2f} {m.replace(chr(10), ' ')}" for t, m in events))
+                        job.log(f"Chat replay: {len(events)} messages.")
+            except Exception as e:
+                job.log(f"Chat replay note: {e}")
     else:
         path = v["path"]
     ffprobe = which("ffprobe")
@@ -77,9 +117,7 @@ def ingest(job, video_id, params):
           "where id=?", (path, title, p["duration"], p["w"], p["h"], p["fps"], os.path.getsize(path),
                          1 if audio else 0, info_path if os.path.exists(info_path) else None, video_id))
     if not audio:
-        raise RuntimeError(NO_SOUND)
-    if p["duration"] < 5:
-        raise RuntimeError(TOO_SHORT)
+        raise RuntimeError("This video has no sound, so ClipForge can't find its best moments.")
     prog(video_id, 100, "Ready to analyze")
 
 
@@ -108,215 +146,6 @@ def parse_chat_events(text):
 # ---------------- find clips ----------------
 def _mmss(t):
     return f"{int(t // 60)}:{int(t % 60):02d}"
-
-
-def _reasons(peak, comp, words, hooks, wps, q_first, ai_info):
-    r = []
-    if ai_info and ai_info.get("reason"):
-        r.append("AI editor: " + ai_info["reason"])
-    if comp["audio"] >= 0.15:
-        r.append(f"Loudness peak at {_mmss(peak)}: {comp['audio']:.0%} of the loudest moment in this video.")
-    if comp.get("action") == "chase":
-        r.append("Looks like a chase: the picture keeps moving fast for a long stretch.")
-    elif comp.get("action") == "crash":
-        r.append("Looks like a crash or explosion: a sudden jolt on screen with a loud bang.")
-    elif comp.get("motion") is not None and comp["motion"] >= 0.3:
-        r.append(f"Big on-screen action here: {comp['motion']:.0%} of the wildest moment.")
-    if comp.get("game"):
-        r.append(f"On screen: {comp['game']}. A big game moment.")
-    if comp.get("fit") is not None and comp["fit"] >= 0.5 and comp.get("fit_by"):
-        r.append(f"Like the clips that got the most views on your channel (strong {comp['fit_by']}).")
-    if comp["heat"] is not None:
-        r.append(f"YouTube 'most replayed' signal here: {comp['heat']:.0%}.")
-    if comp["chat"] is not None:
-        r.append(f"Chat reaction here: {comp['chat']:.0%} of the biggest chat burst.")
-    if hooks:
-        r.append("Hook words in the speech: " + ", ".join(sorted(set(hooks))[:6]) + ".")
-    if q_first:
-        r.append("Opens with a question.")
-    if words:
-        r.append(f"Speech density: {wps:.1f} words per second. Cut starts and ends at sentence boundaries.")
-    else:
-        r.append("No speech detected here. Cut points are time-based, so check them by ear.")
-    return r
-
-
-def _resolve_overlaps(chosen, min_clip=5.0):
-    """Clips may not overlap: where two touch, the boundary moves to the middle. Too-short leftovers are dropped."""
-    chosen = sorted(chosen, key=lambda c: c["s"])
-    out = []
-    for c in chosen:
-        if out and c["s"] < out[-1]["e"]:
-            mid = (c["s"] + out[-1]["e"]) / 2
-            out[-1]["e"] = c["s"] = mid
-            if out[-1]["e"] - out[-1]["s"] < min_clip:
-                out.pop()
-            if c["e"] - c["s"] < min_clip:
-                continue
-        out.append(c)
-    return out
-
-
-def analyze_video(job, video_id, p):
-    v = db.q("select * from videos where id=?", (video_id,), one=True)
-    if v["has_audio"] == 0:
-        raise RuntimeError(NO_SOUND)
-    if (v["duration"] or 0) < 5:
-        raise RuntimeError(TOO_SHORT)
-    ffmpeg = which("ffmpeg")
-    work = wdir(video_id)
-    src, dur, fps = v["path"], v["duration"], v["fps"] or 30
-    n = max(1, min(int(p.get("clips", 20)), 100))
-    length = max(8.0, min(float(p.get("length", 30)), 90.0))
-    min_len, max_len = max(6.0, length * 0.6), max(length * 1.7, 18.0)
-    many = n >= 30
-    min_score = 0.0 if many else float(p.get("min_score", 0.1))
-    gap = length if many else max(length, float(p.get("min_gap", 45)))
-    model, device = p.get("model", "base"), p.get("device", "cpu")
-    compute = "int8" if device == "cpu" else "float16"
-    pad = 5.0
-    db.ex("update videos set status='analyzing', error=null where id=?", (video_id,))
-
-    # 1) the whole video's audio, cheaply
-    prog(video_id, 2, "Listening to the whole video")
-    acache = os.path.join(work, "audio_score.npy")
-    if os.path.exists(acache):
-        a = np.load(acache)
-    else:
-        raw = os.path.join(work, "audio.raw")
-        job.run([ffmpeg, "-y", "-i", src, "-vn", "-ac", "1", "-ar", str(analyze.SR), "-f", "s16le", raw])
-        a = analyze.audio_score(analyze.loudness_db(raw))
-        os.remove(raw)
-        np.save(acache, a)
-    prog(video_id, 14, "Checking the crowd signals")
-    heat = None
-    if v["info_path"] and os.path.exists(v["info_path"]):
-        with open(v["info_path"], encoding="utf-8") as f:
-            heat = analyze.heat_score(json.load(f).get("heatmap"), len(a))
-    chat = None
-    chat_file = os.path.join(work, "chat.txt")
-    if os.path.exists(chat_file):
-        with open(chat_file, encoding="utf-8", errors="ignore") as f:
-            chat = analyze.chat_events_score(parse_chat_events(f.read()), len(a))
-    prog(video_id, 16, "Watching for big on-screen moments")
-    mcache = os.path.join(work, "motion_score.npy")
-    if os.path.exists(mcache):
-        motion = np.load(mcache)
-    else:
-        job.check()
-        motion = analyze.motion_score(ffmpeg, src, len(a))
-        if motion is not None:
-            np.save(mcache, motion)
-    gcache = os.path.join(work, "game_events.json")
-    if os.path.exists(gcache):
-        with open(gcache) as f:
-            events = [tuple(e) for e in json.load(f)]
-    else:
-        prog(video_id, 18, "Looking for game banners (WASTED, BUSTED...)")
-        events = game.banners(ffmpeg, src, check=job.check)
-        if game.available():
-            with open(gcache, "w") as f:
-                json.dump(events, f)
-        job.log(f"Game banners: {len(events)} found." if game.available() else
-                "Game banners skipped (install requirements-extras.txt to turn them on).")
-    gscore = game.banner_score(events, len(a), analyze.FRAME)
-    score = analyze.combine(a, heat, chat, motion, gscore)
-    k = max(1, len(score) // 400)
-    curve = [round(float(score[i:i + k].max()), 3) for i in range(0, len(score), k)]
-    db.ex("update videos set curve=? where id=?", (db.dumps({"step": k * analyze.FRAME, "v": curve}), video_id))
-
-    # 2) candidate moments
-    lead, tail = length * 0.65, length * 0.35
-    n_cand = min(int(n * (1.6 if many else 3)), max(1, int(dur / gap)))
-    cands = analyze.pick_windows(score, n_cand, gap, min_score, lead, tail, dur)
-    if not cands:
-        raise RuntimeError("No exciting moments stood out in this video. Try a shorter clip length.")
-    for c in cands:
-        c["ws"], c["we"] = max(0.0, c["start"] - pad), min(dur, c["end"] + pad)
-    covered = sum(c["we"] - c["ws"] for c in cands)
-
-    # 3) transcribe: once for the whole video if the clips cover most of it, otherwise only the good moments
-    prog(video_id, 20, "Reading what is said")
-    if covered >= 0.45 * dur or len(cands) > 40:
-        tj = os.path.join(work, f"full_{model}.json")
-        if not os.path.exists(tj):
-            wav = os.path.join(work, "full.wav")
-            if not os.path.exists(wav):
-                job.run([ffmpeg, "-y", "-i", src, "-vn", "-ac", "1", "-ar", "16000", wav])
-            res = transcribe_file(wav, model, device, compute, p.get("language") or None,
-                                  on_progress=lambda f: (job.check(), prog(video_id, 22 + f * 58, "Reading what is said")))
-            with open(tj, "w", encoding="utf-8") as f:
-                json.dump(res, f)
-        allw = load_json(tj)
-        for c in cands:
-            c["words"] = [w for w in allw if w["start"] >= c["ws"] - 0.01 and w["end"] <= c["we"] + 0.01]
-    else:
-        for i, c in enumerate(cands, 1):
-            job.check()
-            prog(video_id, 22 + 58 * i / len(cands), f"Reading what is said ({i} of {len(cands)})")
-            key = f"win_{int(c['ws'] * 1000)}_{int(c['we'] * 1000)}"
-            wav, tj = os.path.join(work, key + ".wav"), os.path.join(work, key + ".json")
-            if not os.path.exists(tj):
-                if not os.path.exists(wav):
-                    job.run([ffmpeg, "-y", "-ss", f"{c['ws']:.3f}", "-t", f"{c['we'] - c['ws']:.3f}", "-i", src,
-                             "-vn", "-ac", "1", "-ar", "16000", wav])
-                with open(tj, "w", encoding="utf-8") as f:
-                    json.dump(transcribe_file(wav, model, device, compute, p.get("language") or None), f)
-            c["words"] = [{"w": w["w"], "start": w["start"] + c["ws"], "end": w["end"] + c["ws"]} for w in load_json(tj)]
-
-    # 4) clean cut points and a first score
-    prog(video_id, 82, "Choosing where each clip starts and ends")
-    for c in cands:
-        c["s"], c["e"] = snap(c["words"], c["start"], c["end"], min_len, max_len, dur, fps)
-        c["cw"] = [w for w in c["words"] if w["start"] >= c["s"] - 0.01 and w["end"] <= c["e"] + 0.01]
-        c["text"] = text_score(c["cw"], c["e"] - c["s"])
-
-    # 5) optional smarter scoring with an AI editor
-    key = ai_key()
-    ai_res = {}
-    if key:
-        prog(video_id, 86, "Asking the AI editor")
-        ai_res = ai.score_clips(key, [{"id": str(i), "text": " ".join(w["w"] for w in c["cw"])}
-                                      for i, c in enumerate(cands) if c["cw"]], log=job.log)
-    weights = learned()
-    for i, c in enumerate(cands):
-        c["ai"] = ai_res.get(str(i))
-        sig = c["score"]
-        c["final"] = (0.5 * sig + 0.1 * c["text"] + 0.4 * c["ai"]["score"]) if c["ai"] else (0.7 * sig + 0.3 * c["text"])
-        idx = min(int(c["peak"] / analyze.FRAME), len(a) - 1)
-        banner = next(((t, lab) for t, lab in events if c["s"] - 3 <= t <= c["e"]), (None, None))
-        c["comp"] = comp = {
-            "audio": float(a[idx]), "heat": None if heat is None else float(heat[idx]),
-            "motion": None if motion is None else float(motion[idx]),
-            "chat": None if chat is None else float(chat[idx]), "speech": float(c["text"]),
-            "action": analyze.action_kind(motion, a, int(c["s"] / analyze.FRAME), int(c["e"] / analyze.FRAME)),
-            "game": banner[1], "game_t": banner[0], "ai": c["ai"]["score"] if c["ai"] else None}
-        if weights:   # learned from your posted clips' views: 20% of the final score
-            comp["fit"], comp["fit_by"] = fit(comp, weights)
-            c["final"] = 0.8 * c["final"] + 0.2 * comp["fit"]
-
-    # 6) best N, no overlaps
-    prog(video_id, 94, "Ranking the clips")
-    chosen = _resolve_overlaps(sorted(cands, key=lambda x: -x["final"])[:n])
-    db.ex("delete from clips where video_id=? and status='candidate'", (video_id,))
-    client = db.q("select * from clients where id=?", (v["client_id"],), one=True) if v.get("client_id") else None
-    tpl_default = (client or {}).get("template") or "yellow_pop"
-    music_default = (client or {}).get("music") or ""
-    for c in chosen:
-        comp = c["comp"]
-        txt = " ".join(w["w"] for w in c["cw"]).lower()
-        hooks = [h for h in HOOK_WORDS if h in txt]
-        first = " ".join(w["w"] for w in c["cw"][:12])
-        wps = len(c["cw"]) / max(c["e"] - c["s"], 1)
-        title = (c["ai"] or {}).get("title") or title_of(c["cw"]) or "Untitled clip"
-        db.ex("insert into clips(video_id,start,end,peak,ws,we,score,scores,reasons,words,title,template,layout,res,"
-              "crop_x,music,sfx_intro,sfx_peak,captions,status,render_status,created) "
-              "values(?,?,?,?,?,?,?,?,?,?,?,?,'pip',1080,0.5,?,'','',1,'candidate','none',?)",
-              (video_id, c["s"], c["e"], c["peak"], c["ws"], c["we"], round(c["final"], 4), db.dumps(comp),
-               db.dumps(_reasons(c["peak"], comp, c["cw"], hooks, wps, "?" in first, c["ai"])),
-               db.dumps(c["words"]), title, tpl_default, music_default, db.now()))
-    db.ex("update videos set status='ready', progress=100, stage='', error=null where id=?", (video_id,))
-    job.log(f"{len(chosen)} clips ranked.")
 
 
 # ---------------- learn from your posted clips' views ----------------
@@ -380,20 +209,340 @@ def match_views(posts):
     return len(got)
 
 
+def _reasons(peak, comp, words, hooks, wps, q_first, ai_info):
+    r = []
+    if ai_info and ai_info.get("reason"):
+        r.append("AI editor: " + ai_info["reason"])
+    if comp["audio"] >= 0.15:
+        r.append(f"Loudness peak at {_mmss(peak)}: {comp['audio']:.0%} of the loudest moment in this video.")
+    if comp.get("action") == "chase":
+        r.append("Looks like a chase: the picture keeps moving fast for a long stretch.")
+    elif comp.get("action") == "crash":
+        r.append("Looks like a crash or explosion: a sudden jolt on screen with a loud bang.")
+    elif comp.get("motion") is not None and comp["motion"] >= 0.3:
+        r.append(f"Big on-screen action here: {comp['motion']:.0%} of the wildest moment.")
+    if comp.get("game"):
+        r.append(f"On screen: {comp['game']}. A big game moment.")
+    if comp.get("fit") is not None and comp["fit"] >= 0.5 and comp.get("fit_by"):
+        r.append(f"Like the clips that got the most views on your channel (strong {comp['fit_by']}).")
+    if comp["heat"] is not None:
+        r.append(f"YouTube 'most replayed' signal here: {comp['heat']:.0%}.")
+    if comp["chat"] is not None:
+        r.append(f"Chat reaction here: {comp['chat']:.0%} of the biggest chat burst.")
+    if hooks:
+        r.append("Hook words in the speech: " + ", ".join(sorted(set(hooks))[:6]) + ".")
+    if q_first:
+        r.append("Opens with a question.")
+    if words:
+        r.append(f"Speech density: {wps:.1f} words per second. Cut starts and ends at sentence boundaries.")
+    else:
+        r.append("No speech detected here. Cut points are time-based, so check them by ear.")
+    return r
+
+
+def _resolve_overlaps(chosen, min_clip=5.0):
+    """Clips may not overlap: where two touch, the boundary moves to the middle. Too-short leftovers are dropped."""
+    chosen = sorted(chosen, key=lambda c: c["s"])
+    out = []
+    for c in chosen:
+        if out and c["s"] < out[-1]["e"]:
+            mid = (c["s"] + out[-1]["e"]) / 2
+            out[-1]["e"] = c["s"] = mid
+            if out[-1]["e"] - out[-1]["s"] < min_clip:
+                out.pop()
+            if c["e"] - c["s"] < min_clip:
+                continue
+        out.append(c)
+    return out
+
+
+def analyze_video(job, video_id, p):
+    v = db.q("select * from videos where id=?", (video_id,), one=True)
+    ffmpeg = which("ffmpeg")
+    work = wdir(video_id)
+    src, dur, fps = v["path"], v["duration"], v["fps"] or 30
+    n = max(1, min(int(p.get("clips", 20)), 100))
+    length = max(8.0, min(float(p.get("length", 30)), 90.0))
+    min_len, max_len = max(6.0, length * 0.6), max(length * 1.7, 18.0)
+    many = n >= 30
+    min_score = 0.0 if many else float(p.get("min_score", 0.1))
+    gap = length if many else max(length, float(p.get("min_gap", 45)))
+    model, device = p.get("model", "base"), p.get("device", "cpu")
+    compute = "int8" if device == "cpu" else "float16"
+    pad = 5.0
+    db.ex("update videos set status='analyzing', error=null where id=?", (video_id,))
+
+    # 1) the whole video's audio, cheaply
+    prog(video_id, 2, "Listening to the whole video")
+    acache = os.path.join(work, "audio_score.npy")
+    if os.path.exists(acache):
+        a = np.load(acache)
+    else:
+        raw = os.path.join(work, "audio.raw")
+        job.run([ffmpeg, "-nostdin", "-y", "-i", src, "-vn", "-ac", "1", "-ar", str(analyze.SR), "-f", "s16le", raw])
+        a = analyze.audio_score(analyze.loudness_db(raw))
+        os.remove(raw)
+        np.save(acache, a)
+    prog(video_id, 14, "Checking the crowd signals")
+    heat = None
+    if v["info_path"] and os.path.exists(v["info_path"]):
+        with open(v["info_path"], encoding="utf-8") as f:
+            heat = analyze.heat_score(json.load(f).get("heatmap"), len(a))
+    chat = None
+    chat_file = os.path.join(work, "chat.txt")
+    if os.path.exists(chat_file):
+        with open(chat_file, encoding="utf-8", errors="ignore") as f:
+            chat = analyze.chat_events_score(parse_chat_events(f.read()), len(a))
+    prog(video_id, 16, "Watching for big on-screen moments")
+    mcache = os.path.join(work, "motion_score.npy")
+    if os.path.exists(mcache):
+        motion = np.load(mcache)
+    else:
+        job.check()
+        motion = analyze.motion_score(ffmpeg, src, len(a))
+        if motion is not None:
+            np.save(mcache, motion)
+    gcache = os.path.join(work, "game_events.json")
+    if os.path.exists(gcache):
+        with open(gcache) as f:
+            events = [tuple(e) for e in json.load(f)]
+    else:
+        prog(video_id, 18, "Looking for game banners (WASTED, BUSTED...)")
+        events = game.banners(ffmpeg, src, check=job.check)
+        if game.available():
+            with open(gcache, "w") as f:
+                json.dump(events, f)
+        job.log(f"Game banners: {len(events)} found." if game.available() else
+                "Game banners skipped (install requirements-extras.txt to turn them on).")
+    gscore = game.banner_score(events, len(a), analyze.FRAME)
+    score = analyze.combine(a, heat, chat, motion, gscore)
+    k = max(1, len(score) // 400)
+    curve = [round(float(score[i:i + k].max()), 3) for i in range(0, len(score), k)]
+    db.ex("update videos set curve=? where id=?", (db.dumps({"step": k * analyze.FRAME, "v": curve}), video_id))
+
+    # 2) candidate moments
+    lead, tail = length * 0.65, length * 0.35
+    n_cand = min(int(n * (1.6 if many else 3)), max(1, int(dur / gap)))
+    cands = analyze.pick_windows(score, n_cand, gap, min_score, lead, tail, dur)
+    if not cands:
+        raise RuntimeError("No exciting moments stood out in this video. Try a shorter clip length.")
+    for c in cands:
+        c["start"] = max(0.0, min(dur - 2.0, c["start"]))
+        c["end"] = min(dur, max(c["start"] + 2.0, c["end"]))
+        c["ws"] = max(0.0, min(dur - 2.0, c["start"] - pad))
+        c["we"] = min(dur, max(c["ws"] + 2.0, c["end"] + pad))
+    covered = sum(max(0.0, c["we"] - c["ws"]) for c in cands)
+
+    # 3) transcribe: once for the whole video if the clips cover most of it, otherwise only the good moments
+    prog(video_id, 20, "Reading what is said")
+    if covered >= 0.45 * dur or len(cands) > 40:
+        tj = os.path.join(work, f"full_{model}.json")
+        if not os.path.exists(tj):
+            wav = os.path.join(work, "full.wav")
+            if not os.path.exists(wav):
+                job.run([ffmpeg, "-nostdin", "-y", "-i", src, "-vn", "-ac", "1", "-ar", "16000", wav])
+            res = transcribe_file(wav, model, device, compute, p.get("language") or None,
+                                  on_progress=lambda f: (job.check(), prog(video_id, 22 + f * 58, "Reading what is said")))
+            with open(tj, "w", encoding="utf-8") as f:
+                json.dump(res, f)
+        allw = load_json(tj)
+        for c in cands:
+            c["words"] = [w for w in allw if w["start"] >= c["ws"] - 0.01 and w["end"] <= c["we"] + 0.01]
+    else:
+        for i, c in enumerate(cands, 1):
+            job.check()
+            import time; time.sleep(0.01)
+            prog(video_id, 22 + 58 * i / len(cands), f"Reading what is said ({i} of {len(cands)})")
+            win_dur = max(2.0, c["we"] - c["ws"])
+            key = f"win_{int(c['ws'] * 1000)}_{int(c['we'] * 1000)}"
+            wav, tj = os.path.join(work, key + ".wav"), os.path.join(work, key + ".json")
+            if not os.path.exists(tj):
+                if not os.path.exists(wav):
+                    job.run([ffmpeg, "-nostdin", "-y", "-ss", f"{c['ws']:.3f}", "-t", f"{win_dur:.3f}", "-i", src,
+                             "-vn", "-ac", "1", "-ar", "16000", wav])
+                with open(tj, "w", encoding="utf-8") as f:
+                    json.dump(transcribe_file(wav, model, device, compute, p.get("language") or None), f)
+            c["words"] = [{"w": w["w"], "start": w["start"] + c["ws"], "end": w["end"] + c["ws"]} for w in load_json(tj)]
+
+    # 4) clean cut points and a first score
+    prog(video_id, 82, "Choosing where each clip starts and ends")
+    for c in cands:
+        c["s"], c["e"] = snap(c["words"], c["start"], c["end"], min_len, max_len, dur, fps)
+        c["cw"] = [w for w in c["words"] if w["start"] >= c["s"] - 0.01 and w["end"] <= c["e"] + 0.01]
+        c["text"] = text_score(c["cw"], c["e"] - c["s"])
+
+    # 5) optional smarter scoring with an AI editor
+    key = ai_key()
+    ai_res = {}
+    if key:
+        prog(video_id, 86, "Asking the AI editor")
+        ai_res = ai.score_clips(key, [{"id": str(i), "text": " ".join(w["w"] for w in c["cw"])}
+                                      for i, c in enumerate(cands) if c["cw"]], log=job.log)
+    weights = learned()
+    for i, c in enumerate(cands):
+        c["ai"] = ai_res.get(str(i))
+        sig = c["score"]
+        c["final"] = (0.5 * sig + 0.1 * c["text"] + 0.4 * c["ai"]["score"]) if c["ai"] else (0.7 * sig + 0.3 * c["text"])
+        idx = min(int(c["peak"] / analyze.FRAME), len(a) - 1)
+        banner = next(((t, lab) for t, lab in events if c["s"] - 3 <= t <= c["e"]), (None, None))
+        c["comp"] = comp = {
+            "audio": float(a[idx]), "heat": None if heat is None else float(heat[idx]),
+            "motion": None if motion is None else float(motion[idx]),
+            "chat": None if chat is None else float(chat[idx]), "speech": float(c["text"]),
+            "action": analyze.action_kind(motion, a, int(c["s"] / analyze.FRAME), int(c["e"] / analyze.FRAME)),
+            "game": banner[1], "game_t": banner[0], "ai": c["ai"]["score"] if c["ai"] else None}
+        if weights:   # learned from your posted clips' views: 20% of the final score
+            comp["fit"], comp["fit_by"] = fit(comp, weights)
+            c["final"] = 0.8 * c["final"] + 0.2 * comp["fit"]
+
+    # 6) best N, no overlaps
+    prog(video_id, 94, "Ranking the clips")
+    chosen = _resolve_overlaps(sorted(cands, key=lambda x: -x["final"])[:n])
+    db.ex("delete from clips where video_id=? and status='candidate'", (video_id,))
+    client = db.q("select * from clients where id=?", (v["client_id"],), one=True) if v.get("client_id") else None
+    tpl_default = (client or {}).get("template") or "yellow_pop"
+    music_default = (client or {}).get("music") or ""
+    for c in chosen:
+        comp = c["comp"]
+        txt = " ".join(w["w"] for w in c["cw"]).lower()
+        hooks = [h for h in HOOK_WORDS if h in txt]
+        first = " ".join(w["w"] for w in c["cw"][:12])
+        wps = len(c["cw"]) / max(c["e"] - c["s"], 1)
+        title = (c["ai"] or {}).get("title") or title_of(c["words"]) or (c["words"][0]["w"] if c["words"] else "Untitled clip")
+        init_sfx = auto_sfx({"start": c["s"], "end": c["e"], "peak": c["peak"], "words": c["words"], "video_id": video_id})
+        db.ex("insert into clips(video_id,start,end,peak,ws,we,score,scores,reasons,words,title,template,layout,res,"
+              "crop_x,music,sfx_intro,sfx_peak,captions,status,render_status,created,sfx,hook_zoom,emojis,censor) "
+              "values(?,?,?,?,?,?,?,?,?,?,?,?,'stack',1080,0.5,?,'whoosh.wav','sub_bass_drop.wav',1,'candidate','none',?,?,1,1,0)",
+              (video_id, c["s"], c["e"], c["peak"], c["ws"], c["we"], round(c["final"], 4), db.dumps(comp),
+               db.dumps(_reasons(c["peak"], comp, c["cw"], hooks, wps, "?" in first, c["ai"])),
+               db.dumps(c["words"]), title, tpl_default, music_default, db.now(), db.dumps(init_sfx)))
+    db.ex("update videos set status='ready', progress=100, stage='', error=null where id=?", (video_id,))
+    job.log(f"{len(chosen)} clips ranked.")
+
+
 # ---------------- captions for a clip ----------------
+def ensure_clip_words(clip, video=None):
+    """Ensure the clip has valid words with good coverage. Checks full video json cache first,
+    then falls back to on-the-fly Whisper transcription of the clip audio."""
+    if not clip or not isinstance(clip, dict):
+        return []
+    s = float(clip.get("start", 0.0) or 0.0)
+    e = float(clip.get("end", s + 1.0) or (s + 1.0))
+    dur = max(0.5, e - s)
+    cid = clip.get("id")
+
+    vid_id = clip.get("video_id") or (video.get("id") if isinstance(video, dict) else None)
+    if not video and vid_id:
+        video = db.q("select * from videos where id=?", (vid_id,), one=True)
+    if not video:
+        raw = clip.get("words")
+        return json.loads(raw) if isinstance(raw, str) else (raw or [])
+
+    work = wdir(vid_id)
+
+    # 1. First, check if full video transcription cache exists in work/
+    if os.path.isdir(work):
+        for fn in os.listdir(work):
+            if fn.startswith("full_") and fn.endswith(".json"):
+                try:
+                    full_words = load_json(os.path.join(work, fn))
+                    filtered = [w for w in full_words if float(w.get("end", 0)) >= s - 0.2 and float(w.get("start", 0)) <= e + 0.2]
+                    if filtered:
+                        if cid:
+                            db.ex("update clips set words=? where id=?", (db.dumps(filtered), cid))
+                        clip["words"] = filtered
+                        return filtered
+                except Exception:
+                    pass
+
+    # 2. Extract audio and transcribe with Whisper
+    src = clip_source(clip, video)
+    if not src or not os.path.exists(src):
+        raw = clip.get("words")
+        return json.loads(raw) if isinstance(raw, str) else (raw or [])
+
+    try:
+        ffmpeg = which("ffmpeg")
+        clip_wav = os.path.join(work, f"clip_{cid or 'tmp'}_speech.wav")
+        vpath = video.get("path") if isinstance(video, dict) else None
+        is_full = bool(vpath and os.path.exists(vpath) and os.path.abspath(src) == os.path.abspath(vpath))
+        ss_val = s if is_full else 0.0
+        cmd = [ffmpeg, "-y", "-ss", f"{ss_val:.3f}", "-t", f"{dur:.3f}", "-i", src,
+               "-vn", "-ac", "1", "-ar", "16000", clip_wav]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        tr = transcribe_file(clip_wav, model="base")
+        tr_words = tr.get("words") or []
+        if tr_words:
+            new_words = []
+            for w in tr_words:
+                st = round(s + w["start"], 3) if is_full else round(w["start"], 3)
+                en = round(s + w["end"], 3) if is_full else round(w["end"], 3)
+                new_words.append({"w": w["w"], "start": st, "end": en})
+            if cid:
+                db.ex("update clips set words=? where id=?", (db.dumps(new_words), cid))
+            clip["words"] = new_words
+            return new_words
+    except Exception:
+        pass
+
+    raw = clip.get("words")
+    return json.loads(raw) if isinstance(raw, str) else (raw or [])
+
+
 def clip_words(clip):
-    """Words inside the clip on the clip timeline, each remembering its index in the stored word list."""
-    words = json.loads(clip["words"])
-    return [{"w": w["w"], "start": w["start"] - clip["start"], "end": w["end"] - clip["start"], "i": i}
+    """Words inside the clip on the clip timeline, each remembering its index in the stored word list.
+    Handles both absolute video timeline timestamps and 0-relative clip timestamps seamlessly."""
+    if not clip or not isinstance(clip, dict):
+        return []
+    s = float(clip.get("start", 0.0) or 0.0)
+    e = float(clip.get("end", s + 1.0) or (s + 1.0))
+    dur = max(0.5, e - s)
+    raw = clip.get("words")
+    words = json.loads(raw) if isinstance(raw, str) else (raw or [])
+
+    # 1. Try matching words on the absolute timeline
+    matching = [
+        {"w": w["w"], "start": round(max(0.0, float(w.get("start", 0)) - s), 3),
+         "end": round(min(dur, float(w.get("end", 0)) - s), 3), "i": i}
+        for i, w in enumerate(words)
+        if float(w.get("end", 0)) >= s - 0.2 and float(w.get("start", 0)) <= e + 0.2
+    ]
+
+    # 2. If no absolute match, check if words are already 0-relative (e.g. from cut clip/live moment)
+    if not matching and words:
+        matching = [
+            {"w": w["w"], "start": round(max(0.0, float(w.get("start", 0))), 3),
+             "end": round(min(dur, float(w.get("end", 0))), 3), "i": i}
             for i, w in enumerate(words)
-            if w["start"] >= clip["start"] - 0.01 and w["end"] <= clip["end"] + 0.01]
+            if float(w.get("end", 0)) >= 0.0 and float(w.get("start", 0)) <= dur + 0.5
+        ]
+
+    # 3. If still no words or coverage is too poor (<15%), ensure words via transcription or full json
+    if not matching or (matching[-1]["end"] - matching[0]["start"] < dur * 0.15):
+        new_words = ensure_clip_words(clip)
+        if new_words:
+            matching = [
+                {"w": w["w"], "start": round(max(0.0, float(w.get("start", 0)) - s), 3),
+                 "end": round(min(dur, float(w.get("end", 0)) - s), 3), "i": i}
+                for i, w in enumerate(new_words)
+                if float(w.get("end", 0)) >= s - 0.2 and float(w.get("start", 0)) <= e + 0.2
+            ]
+            if not matching:
+                matching = [
+                    {"w": w["w"], "start": round(max(0.0, float(w.get("start", 0))), 3),
+                     "end": round(min(dur, float(w.get("end", 0))), 3), "i": i}
+                    for i, w in enumerate(new_words)
+                    if float(w.get("end", 0)) >= 0.0 and float(w.get("start", 0)) <= dur + 0.5
+                ]
+    return matching
 
 
 def auto_sfx(clip):
     """Effects that make a clip hit harder: whoosh in, riser into the big moment, boom on it, pops on reaction words.
     Times are on the video timeline (like start/end), so trimming never moves them off their moment."""
-    s, dur = clip["start"], clip["end"] - clip["start"]
-    peak = clip["peak"] - s
+    s = clip.get("start", 0.0)
+    dur = max(0.5, clip.get("end", s + 1.0) - s)
+    peak = clip.get("peak", s + dur * 0.4) - s
     if not 0.5 < peak < dur - 0.3:
         peak = dur * 0.4
     out = [{"f": "whoosh.wav", "t": 0.0, "v": 0.5}]
@@ -420,7 +569,35 @@ def auto_sfx(clip):
 
 
 def clip_cues(clip):
-    return captions.build_cues(clip_words(clip))
+    words = clip_words(clip)
+    if words:
+        cues = captions.build_cues(words)
+        if cues:
+            return cues
+
+    # Fallback to kinetic phrase cues from title so subtitles never appear blank
+    title = (clip.get("title") or "MOMENT OF THE STREAM 🔥").strip()
+    s = clip.get("start", 0.0)
+    dur = max(1.0, clip.get("end", s + 1.0) - s)
+    words_list = title.split()
+    if not words_list:
+        words_list = ["WATCH", "THIS", "MOMENT", "🔥"]
+
+    chunk_size = 3
+    chunks = [words_list[i:i + chunk_size] for i in range(0, len(words_list), chunk_size)]
+    chunk_dur = min(2.5, dur / max(len(chunks), 1))
+    cues = []
+    for idx, ch in enumerate(chunks):
+        c_start = idx * chunk_dur
+        c_end = min(dur, c_start + chunk_dur)
+        w_dur = (c_end - c_start) / max(len(ch), 1)
+        c_words = []
+        for j, wrd in enumerate(ch):
+            ws = c_start + j * w_dur
+            we = ws + w_dur
+            c_words.append({"w": wrd, "start": ws, "end": we, "i": idx * 10 + j})
+        cues.append({"words": c_words, "start": c_start, "end": c_end, "text": " ".join(ch)})
+    return cues
 
 
 def edit_cue(clip, first, last, text):
@@ -443,6 +620,17 @@ def edit_cue(clip, first, last, text):
             cur += d
         words[first:last + 1] = new
     return words
+
+
+def banner_times(c):
+    """When the hook text shows, on the clip timeline: (t0, t1), or (None, None) for the whole clip.
+    banner_start/banner_end are stored on the video timeline (like sound effects), so trimming never moves the text."""
+    bs, be, dur = c.get("banner_start"), c.get("banner_end"), c["end"] - c["start"]
+    if bs is None and be is None:
+        return None, None
+    t0 = max(0.0, (bs if bs is not None else c["start"]) - c["start"])
+    t1 = min(dur, (be if be is not None else c["end"]) - c["start"])
+    return (None, None) if t1 - t0 < 0.3 else (round(t0, 3), round(t1, 3))
 
 
 # ---------------- translated captions + voice-over ----------------
@@ -481,47 +669,145 @@ def _lang_and_voice(job, c, cues, work):
 # ---------------- face framing + render ----------------
 def get_track(job, clip, video):
     """Face-following crop path for a clip (cached until the clip's start or end changes)."""
-    if clip["track"]:
-        t = json.loads(clip["track"])
-        if abs(t["start"] - clip["start"]) < 0.01 and abs(t["end"] - clip["end"]) < 0.01:
-            return t
-    t = faces.track(which("ffmpeg"), clip_source(clip, video), video["w"], video["h"], clip["start"], clip["end"],
-                    fps=5, should_stop=job.check if job else None)
-    t["start"], t["end"] = clip["start"], clip["end"]
-    db.ex("update clips set track=? where id=?", (db.dumps(t), clip["id"]))
+    s = clip.get("start", 0.0)
+    e = clip.get("end", s + 1.0)
+    if clip.get("track"):
+        try:
+            t = json.loads(clip["track"])
+            if abs(t.get("start", 0) - s) < 0.01 and abs(t.get("end", 0) - e) < 0.01:
+                return t
+        except Exception:
+            pass
+    aspect = str(clip.get("aspect_ratio") or "9:16").strip()
+    target_ratio = 1.0 if aspect == "1:1" else (16/9 if aspect == "16:9" else 9/16)
+    vw = (video.get("w") if isinstance(video, dict) else None) or 1280
+    vh = (video.get("h") if isinstance(video, dict) else None) or 720
+    t = faces.track(which("ffmpeg"), clip_source(clip, video), vw, vh, s, e,
+                    fps=5, should_stop=job.check if job else None, target_ratio=target_ratio)
+    t["start"], t["end"] = s, e
+    cid = clip.get("id")
+    if cid:
+        db.ex("update clips set track=? where id=?", (db.dumps(t), cid))
     return t
 
 
 def get_cam(job, clip, video):
     """Facecam box for the stacked layout (cached until the clip's start or end changes).
-    A box drawn by hand on the video wins over detection for all its clips."""
-    if video.get("cam_box"):
-        x, y, w, h = json.loads(video["cam_box"])
-        return {"cam": faces.fit_panel(x, y, w, h, x + w / 2, y + h / 2), "box": [x, y, w, h], "kind": "facecam",
-                "exact": True, "manual": True}
-    if clip["cam"]:
-        c = json.loads(clip["cam"])
-        if "box" in c and abs(c["start"] - clip["start"]) < 0.01 and abs(c["end"] - clip["end"]) < 0.01:
-            return c
+    A clip-specific corner or box chosen wins over general video detection."""
+    vw = (video.get("w") if isinstance(video, dict) else None) or 1280
+    vh = (video.get("h") if isinstance(video, dict) else None) or 720
+    split_r = float(clip.get("split_ratio") or 0.5)
+
+    # 1. Corner preset selected on clip
+    corner = clip.get("cam_corner")
+    if corner and corner in ("tl", "tr", "bl", "br", "tc", "bc"):
+        if corner == "tl":
+            box = [0, 0, int(vw * 0.35), int(vh * 0.50)]
+        elif corner == "bl":
+            box = [0, int(vh * 0.45), int(vw * 0.35), int(vh * 0.55)]
+        elif corner == "br":
+            box = [int(vw * 0.65), int(vh * 0.45), int(vw * 0.35), int(vh * 0.55)]
+        elif corner == "tc":
+            box = [int(vw * 0.325), 0, int(vw * 0.35), int(vh * 0.50)]
+        elif corner == "bc":
+            box = [int(vw * 0.325), int(vh * 0.45), int(vw * 0.35), int(vh * 0.55)]
+        else: # tr
+            box = [int(vw * 0.65), 0, int(vw * 0.35), int(vh * 0.50)]
+        return {"cam": faces.fit_panel(box[0], box[1], box[2], box[3], box[0] + box[2] / 2, box[1] + box[3] / 2, top_share=split_r),
+                "box": box, "kind": "facecam", "exact": True, "manual": True}
+
+    # 2. Hand-drawn box on video
+    if isinstance(video, dict) and video.get("cam_box"):
+        try:
+            x, y, bw, bh = json.loads(video["cam_box"])
+            return {"cam": faces.fit_panel(x, y, bw, bh, x + bw / 2, y + bh / 2, top_share=split_r), "box": [x, y, bw, bh], "kind": "facecam",
+                    "exact": True, "manual": True}
+        except Exception:
+            pass
+
+    s = clip.get("start", 0.0)
+    e = clip.get("end", s + 1.0)
+    cid = clip.get("id")
+    vid = clip.get("video_id") or (video.get("id") if isinstance(video, dict) else None)
+
+    if clip.get("cam"):
+        try:
+            c = json.loads(clip["cam"])
+            if "box" in c and abs(c.get("start", 0) - s) < 0.01 and abs(c.get("end", 0) - e) < 0.01:
+                return c
+        except Exception:
+            pass
+    if vid and cid:
+        other = db.q("select cam from clips where video_id=? and cam is not null and cam != '' and id != ? limit 1",
+                     (vid, cid), one=True)
+        if other and other.get("cam"):
+            try:
+                c = json.loads(other["cam"])
+                if c.get("box") and c.get("kind") == "facecam" and c.get("exact"):
+                    c["start"], c["end"] = s, e
+                    db.ex("update clips set cam=? where id=?", (db.dumps(c), cid))
+                    return c
+            except Exception:
+                pass
     if job:
         job.check()
-    c = faces.find_facecam(which("ffmpeg"), clip_source(clip, video), video["w"], video["h"], clip["start"], clip["end"])
-    c["start"], c["end"] = clip["start"], clip["end"]
-    db.ex("update clips set cam=? where id=?", (db.dumps(c), clip["id"]))
+    c = faces.find_facecam(which("ffmpeg"), clip_source(clip, video), vw, vh, s, e, top_share=split_r)
+    c["start"], c["end"] = s, e
+    if cid:
+        db.ex("update clips set cam=? where id=?", (db.dumps(c), cid))
+    if isinstance(video, dict) and not video.get("cam_box") and c.get("kind") == "facecam" and c.get("box") and c.get("exact") and video.get("id"):
+        try:
+            db.ex("update videos set cam_box=? where id=? and cam_box is null", (db.dumps(c["box"]), video["id"]))
+        except Exception:
+            pass
     return c
 
 
 def framing(clip, video):
     """What the browser preview needs to mimic the face-following crop or the stacked layout."""
-    if clip["layout"] in ("stack", "pip"):
+    vw = (video.get("w") if isinstance(video, dict) else None) or 1280
+    vh = (video.get("h") if isinstance(video, dict) else None) or 720
+    layout = clip.get("layout", "stack")
+    if layout in ("stack", "pip"):
         c = get_cam(None, clip, video)
-        if c["kind"] != "camera":
-            return {"stack": True, "pip": clip["layout"] == "pip", "size": faces.PIP_SIZE, "ptop": faces.PIP_TOP,
-                    "kind": c["kind"], "cam": c["cam"], "box": c["box"], "w": video["w"], "h": video["h"],
-                    "top": faces.TOP_SHARE, "found": 1.0 if c["cam"] else 0.0, "pts": [], "manual": bool(c.get("manual"))}
+        cam_box = c.get("box")
+        cam_crop = c.get("cam")
+        if not cam_box or not cam_crop:
+            corner = clip.get("cam_corner") or "tr"
+            if corner == "tl":
+                cam_box = [0, 0, int(vw * 0.35), int(vh * 0.50)]
+            elif corner == "bl":
+                cam_box = [0, int(vh * 0.45), int(vw * 0.35), int(vh * 0.55)]
+            elif corner == "br":
+                cam_box = [int(vw * 0.65), int(vh * 0.45), int(vw * 0.35), int(vh * 0.55)]
+            elif corner == "tc":
+                cam_box = [int(vw * 0.325), 0, int(vw * 0.35), int(vh * 0.50)]
+            elif corner == "bc":
+                cam_box = [int(vw * 0.325), int(vh * 0.45), int(vw * 0.35), int(vh * 0.55)]
+            elif corner == "center":
+                cam_box = [int(vw * 0.25), int(vh * 0.15), int(vw * 0.5), int(vh * 0.6)]
+            else:
+                cam_box = [int(vw * 0.65), 0, int(vw * 0.35), int(vh * 0.50)]
+            cam_crop = faces.fit_panel(cam_box[0], cam_box[1], cam_box[2], cam_box[3],
+                                       cam_box[0] + cam_box[2] / 2, cam_box[1] + cam_box[3] / 2)
+        split_ratio = float(clip.get("split_ratio") or 0.5)
+        return {"stack": layout == "stack", "pip": layout == "pip",
+                "size": faces.PIP_SIZE, "ptop": faces.PIP_TOP,
+                "kind": c.get("kind") or "facecam", "cam": cam_crop, "box": cam_box, "w": vw, "h": vh,
+                "top": split_ratio, "split_ratio": split_ratio, "found": 1.0, "pts": [], "manual": bool(c.get("manual")),
+                "cam_zoom": float(clip.get("cam_zoom") or 1.0),
+                "cam_crop_x": float(clip.get("cam_crop_x") if clip.get("cam_crop_x") is not None else 0.5),
+                "cam_crop_y": float(clip.get("cam_crop_y") if clip.get("cam_crop_y") is not None else 0.5),
+                "cam_shape": clip.get("cam_shape") or "rect",
+                "cam_corner": clip.get("cam_corner") or "tr",
+                "cam_pos": clip.get("cam_pos") or "top",
+                "cam_pos_x": float(clip.get("cam_pos_x") or 0.5),
+                "cam_pos_y": float(clip.get("cam_pos_y") or 0.65),
+                "banner_text": clip.get("banner_text") or "",
+                "banner_style": clip.get("banner_style") or "white_box"}
     t = get_track(None, clip, video)
-    room = max(video["w"] - t["cw"], 1)
-    return {"found": t["found"], "cw": t["cw"], "w": video["w"], "h": video["h"],
+    room = max(vw - t["cw"], 1)
+    return {"found": t["found"], "cw": t["cw"], "w": vw, "h": vh,
             "pts": [[p[0], round(p[1] / room, 4)] for p in t["pts"]]}
 
 
@@ -556,10 +842,38 @@ def render(job, clip_id, p):
     info = {"w": v["w"], "h": v["h"], "fps": v["fps"], "duration": v["duration"]}
     cues = clip_cues(c) if c["captions"] else []
     work = wdir(c["video_id"])
-    cues, vo = _lang_and_voice(job, c, cues, work)
     ass = os.path.join(work, f"clip_{clip_id}.ass")
+    censor = bool(c["censor"]) if ("censor" in c and c["censor"] is not None) else False
+    emojis = bool(c["emojis"]) if ("emojis" in c and c["emojis"] is not None) else True
+    hook_zoom = bool(c["hook_zoom"]) if ("hook_zoom" in c and c["hook_zoom"] is not None) else True
+    banner_text = c.get("banner_text") or ""
+    banner_style = c.get("banner_style") or "white_box"
+    banner_x = float(c.get("banner_x") if c.get("banner_x") is not None else 0.5)
+    banner_y = float(c.get("banner_y") if c.get("banner_y") is not None else 0.12)
+    banner_size = float(c.get("banner_size") if c.get("banner_size") is not None else 1.0)
+    banner_font = str(c.get("banner_font") or "Arial")
+    caption_size = float(c.get("caption_size") if c.get("caption_size") is not None else 1.0)
+    caption_font = str(c.get("caption_font") or "Arial")
+    banner_t0, banner_t1 = banner_times(c)
+
+    res_base = int(c["res"] or 1080)
+    aspect = str(c.get("aspect_ratio") or "9:16").strip()
+    if aspect == "1:1":
+        W, H = res_base, res_base
+    elif aspect == "16:9":
+        H = res_base
+        W = int(res_base * 16 / 9) // 2 * 2
+    else:
+        W = res_base
+        H = int(res_base * 16 / 9) // 2 * 2
+
+    cues, vo = _lang_and_voice(job, c, cues, work)
     with open(ass, "w", encoding="utf-8") as f:
-        f.write(captions.to_ass(cues, c["template"]))
+        f.write(captions.to_ass(cues, c["template"], width=W, height=H, censor=censor, emojis=emojis, hook_boost=True,
+                                banner_text=banner_text, banner_style=banner_style, banner_x=banner_x, banner_y=banner_y,
+                                banner_size=banner_size, banner_font=banner_font,
+                                caption_size=caption_size, caption_font=caption_font,
+                                banner_t0=banner_t0, banner_t1=banner_t1))
     out_dir = os.path.join(db.DATA, "exports")
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"clip_{clip_id}.mp4")
@@ -572,7 +886,7 @@ def render(job, clip_id, p):
             db.ex("update clips set render_progress=? where id=?", (pct, clip_id))
     setp(0.01)
     track, layout = None, c["layout"]
-    wide = v["w"] / v["h"] > 9 / 16 + 0.01
+    wide = v["w"] / v["h"] > (W / H) + 0.01
     if layout in ("stack", "pip") and wide:
         cam = get_cam(job, c, v)
         job.log({"facecam": "Facecam found: placed over the gameplay." if layout == "pip" else "Facecam found: stacked above the gameplay.", "camera": "Full camera shot: following the face.",
@@ -587,6 +901,10 @@ def render(job, clip_id, p):
     src, start, end = clip_source(c, v), c["start"], c["end"]
     if v["hd"] and not c["src"]:
         src, start, end, info, track = _hd_part(job, c, v, info, track) or (src, start, end, info, track)
+    elif src and src != (v.get("path") if isinstance(v, dict) else None):
+        # src is already cut to this clip (starts at 0.0)
+        start = 0.0
+        end = c["end"] - c["start"]
     setp(0.12)
     dur = c["end"] - c["start"]
     sfx = []
@@ -595,13 +913,32 @@ def render(job, clip_id, p):
         sfx.append((path, 0.0, 0.7))
     for e in json.loads(c["sfx"] or "[]"):                 # placed effects, stored on the video timeline
         path = audiolib.resolve("sfx", e["f"])
-        if path and c["start"] - 0.01 <= e["t"] < c["end"]:        # times are rounded to 1 ms
-            sfx.append((path, max(e["t"] - c["start"], 0.0), e["v"]))
+        if path and c["start"] <= e["t"] < c["end"]:
+            sfx.append((path, e["t"] - c["start"], e["v"]))
     music = audiolib.resolve("music", c["music"])
-    job.log(f"Rendering {dur:.0f}s clip at {RES[c['res']][0]}x{RES[c['res']][1]}...")
+    job.log(f"Rendering {dur:.0f}s clip at {W}x{H} ({aspect})...")
+    if c.get("sfx_peak"):
+        p_peak = audiolib.resolve("sfx", c["sfx_peak"])
+        if p_peak:
+            peak_offset = max(0.5, min(dur - 0.5, c["peak"] - c["start"]))
+            if not any(abs(at - peak_offset) < 0.8 for _, at, _ in sfx):
+                sfx.append((p_peak, peak_offset, 0.85))
     render_clip(job, ffmpeg, src, info, start, end, ass, out, layout, c["crop_x"],
                 res=c["res"], music=music, music_vol=0.18, duck=True, sfx=sfx, track=track,
-                on_progress=lambda f: setp(0.12 + 0.88 * f), vo=vo)
+                hook_zoom=hook_zoom, on_progress=lambda f: setp(0.12 + 0.88 * f),
+                cam_zoom=float(c.get("cam_zoom") or 1.0),
+                cam_shape=c.get("cam_shape") or "rect",
+                cam_pos=c.get("cam_pos") or "top",
+                cam_pos_x=float(c.get("cam_pos_x") or 0.5),
+                cam_pos_y=float(c.get("cam_pos_y") or 0.65),
+                split_ratio=float(c.get("split_ratio") or 0.5),
+                cam_crop_x=float(c.get("cam_crop_x") if c.get("cam_crop_x") is not None else 0.5),
+                cam_crop_y=float(c.get("cam_crop_y") if c.get("cam_crop_y") is not None else 0.5),
+                cam_corner=c.get("cam_corner") or "tr",
+                aspect_ratio=aspect,
+                game_zoom=float(c.get("game_zoom") or 1.0),
+                crop_y=float(c.get("crop_y") if c.get("crop_y") is not None else 0.5),
+                vo=vo)
     db.ex("update clips set render_status='done', render_progress=100, render_path=?, qc=? where id=?",
           (out, db.dumps(quality_check(ffmpeg, out, clip_words(c))), clip_id))
 
@@ -641,6 +978,8 @@ def _uploader(info_path, mtime):
 
 def credit(v):
     """(streamer name or None, platform name or '') for a video, from its link and download info."""
+    if not v:
+        return None, ""
     src = v.get("source") or ""
     plat = next((n for k, n in (("twitch.tv", "Twitch"), ("kick.com", "Kick"), ("youtu", "YouTube")) if k in src), "")
     who = None

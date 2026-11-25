@@ -46,6 +46,21 @@ _STARTER = {
                          ":d=0.3:s=44100"],
     "heartbeat.wav": ["-f", "lavfi", "-i", "aevalsrc=0.9*sin(2*PI*50*t)*(exp(-20*mod(t\\,0.8))+0.7*gte(t\\,0.2)*exp(-20*mod(t-0.2\\,0.8)))"
                       ":d=2.4:s=44100"],
+    "sub_bass_drop.wav": [
+        "-f", "lavfi", "-i",
+        "aevalsrc=0.9*sin(2*PI*(75-25*t)*t)*exp(-1.5*t)+0.3*sin(2*PI*40*t)*exp(-1.2*t):d=1.8:s=44100",
+        "-af", "lowpass=f=120,volume=2.2"
+    ],
+    "vine_boom.wav": [
+        "-f", "lavfi", "-i",
+        "aevalsrc=0.95*sin(2*PI*(65-20*t)*t)*exp(-2.5*t)+0.5*sin(2*PI*35*t)*exp(-2.0*t):d=1.2:s=44100",
+        "-af", "bass=g=12:f=60,volume=2.5"
+    ],
+    "record_scratch.wav": [
+        "-f", "lavfi", "-i",
+        "anoisesrc=d=0.4:c=brown:a=0.8",
+        "-af", "bandpass=f=1800:width_type=h:w=900,afade=t=out:st=0.15:d=0.25,volume=1.8"
+    ]
 }
 
 
@@ -78,6 +93,6 @@ def make_starter_sfx(ffmpeg):
     for name, args in _STARTER.items():
         out = os.path.join(folder("sfx"), name)
         if not os.path.exists(out):
-            subprocess.run([ffmpeg, "-y", "-loglevel", "error"] + args + [out], check=True)
+            subprocess.run([ffmpeg, "-nostdin", "-y", "-loglevel", "error"] + args + [out], check=True)
             made.append(name)
     return made

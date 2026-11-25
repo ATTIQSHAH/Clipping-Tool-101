@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ClipForge</title>
-<link rel="stylesheet" href="/static/style.css"><link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header>
@@ -28,7 +28,10 @@
       </div></details>
 
     <div class="card stack">
-      <h2>Add a video</h2>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">
+        <h2 style="margin:0">Add a video</h2>
+        <span id="mainCookieBadge" class="pill" style="font-size:11px;padding:3px 8px;cursor:pointer" title="Click to manage cookies in Settings">Checking cookies…</span>
+      </div>
       <textarea id="links" placeholder="Paste video links, one per line"></textarea>
       <div class="row">
         <div><label for="a_clips">Clips</label><input id="a_clips" type="number" min="1" max="100" value="20"></div>
@@ -74,8 +77,52 @@
       <select id="s_model"><option value="base">Fast (base)</option><option value="small">Better (small)</option><option value="medium">Best, slow (medium)</option></select></div>
     <div><label for="s_key">AI scoring key (optional)</label><input id="s_key" type="password" placeholder="Anthropic API key" autocomplete="off">
       <p class="muted small" style="margin:6px 0 0">With a key, an AI editor also reads each clip's transcript to judge humor, surprise and whether the clip is complete. The transcripts are sent to Anthropic. Without a key the built-in scoring is used.</p></div>
-    <div><label for="s_chan">Learn from your channel</label><div class="row"><input id="s_chan" placeholder="https://www.youtube.com/@yourchannel"><button id="s_fetch" class="fit">Get views</button></div>
+    <div><label for="s_chan">Learn from your channel</label><div class="row"><input id="s_chan" placeholder="https://www.youtube.com/@yourchannel"><button id="s_fetch" class="fit" type="button">Get views</button></div>
       <p id="s_learn" class="muted small" style="margin:6px 0 0"></p></div>
+    <div><label for="s_browser">Age-restricted / YouTube Cookies</label>
+      <div class="row" style="gap:8px;align-items:center">
+        <select id="s_browser" style="flex:1">
+          <option value="">Browser cookies: None (default)</option>
+          <option value="chrome">Chrome</option>
+          <option value="edge">Edge</option>
+          <option value="firefox">Firefox</option>
+          <option value="brave">Brave</option>
+          <option value="opera">Opera</option>
+        </select>
+        <button id="s_upload_ck" type="button" class="fit">Upload cookies.txt</button>
+        <button id="s_del_ck" type="button" class="ghost fit" hidden>Remove cookies</button>
+        <input type="file" id="s_file_ck" accept=".txt" hidden>
+      </div>
+      <p id="s_ck_status" class="muted small" style="margin:6px 0 0">Used to download 18+ age-restricted YouTube videos automatically.</p>
+    </div>
+    <div style="border-top:1px solid var(--line);padding-top:14px;margin-top:6px">
+      <label style="font-weight:600;display:flex;align-items:center;gap:6px">
+        <span>💾 Data Storage & Auto-Cleanup</span>
+      </label>
+      <div id="storageStatsBox" style="background:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:6px;font-size:12px;line-height:1.7">
+        <div class="row" style="justify-content:space-between"><span>⭐ <b>Saved Videos (Exports):</b></span><span id="st_exports" style="color:#4ade80;font-weight:bold">0 MB</span></div>
+        <div class="row" style="justify-content:space-between"><span>🧹 <b>Temporary Audio & Feature Cache:</b></span><span id="st_work" style="color:var(--muted)">0 MB</span></div>
+        <div class="row" style="justify-content:space-between"><span>📹 <b>Source Videos & Slices:</b></span><span id="st_originals" style="color:var(--muted)">0 MB</span></div>
+        <div class="row" style="justify-content:space-between"><span>📡 <b>Live Stream Chunks:</b></span><span id="st_live" style="color:var(--muted)">0 MB</span></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px;border-top:1px dashed var(--line);padding-top:4px">
+          🛡️ <i>Your approved and rendered clips in <code>data/exports/</code> are permanent and never deleted automatically.</i>
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <label for="s_retention">Auto-delete temporary cache</label>
+        <div class="row" style="gap:8px;align-items:center">
+          <select id="s_retention" style="flex:1">
+            <option value="24">After 1 day (24 hours)</option>
+            <option value="48">After 2 days (48 hours) - Recommended</option>
+            <option value="72">After 3 days (72 hours)</option>
+            <option value="168">After 7 days</option>
+            <option value="0">Never auto-delete</option>
+          </select>
+          <button id="s_cleanup_btn" type="button" class="ghost fit" style="white-space:nowrap">🧹 Clean Now</button>
+        </div>
+        <p class="muted small" style="margin:6px 0 0">Automatically deletes intermediate wav/npy files, whisper audio, and preview slices after 1–2 days. Rendered/saved clips are always preserved.</p>
+      </div>
+    </div>
     <p id="s_state" class="small"></p>
     <div class="row"><button id="s_save" class="primary">Save</button><button id="s_test">Test key</button><button id="s_close" class="ghost">Close</button></div>
   </div>
@@ -144,7 +191,7 @@ $('#addLinks').onclick=guard(async()=>{
 $('#pastGo').onclick=guard(async()=>{
   const box=$('#pastList');box.innerHTML='<p class="muted small" style="margin:0">Looking…</p>';
   try{const l=await api('/api/past?url='+encodeURIComponent($('#pastUrl').value.trim()));
-    box.innerHTML=l.length?l.map((p,i)=>`<div class="row" style="align-items:center"><div style="flex:1;min-width:0"><div class="small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.title)}</div><div class="muted small">${p.duration?fmtLong(p.duration):''}</div></div><button class="fit" data-p="${i}">Make clips</button></div>`).join(''):'<p class="muted small" style="margin:0">No past streams found.</p>';
+    box.innerHTML=l.length?l.map((p,i)=>`<div class="row" style="align-items:center;margin-bottom:6px"><div style="flex:1;min-width:0"><div class="small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.title)}</div><div class="muted small">${p.duration?fmtLong(p.duration):''}</div></div><button class="fit" data-p="${i}" style="padding:4px 8px;font-size:12px">Make clips</button></div>`).join(''):'<p class="muted small" style="margin:0">No past streams found.</p>';
     box.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{$('#links').value=l[+b.dataset.p].url;$('#addLinks').click()});
   }catch(e){box.innerHTML='';throw e}});
 $('#pick').onclick=()=>$('#files').click();
@@ -208,10 +255,10 @@ function drawLib(){
   const box=$('#lib');if(!box)return;
   sync(box,myVideos(),v=>v.id,v=>[v.title,v.status,Math.round(v.progress),v.clips,v.approved,v.duration].join('|'),v=>{
     const busy=v.status==='importing'||v.status==='analyzing';
-    return `<div class="th">${v.has_file&&v.duration?`<img src="/api/videos/${v.id}/thumb?s=${v.status}" loading="lazy" alt="" onerror="this.remove()">`:''}
+    return `<div class="th"><img src="/api/videos/${v.id}/thumb?s=${v.status}" loading="lazy" alt="" onerror="this.remove()">
       ${v.duration?`<span class="dur">${fmtLong(v.duration)}</span>`:''}${v.status==='live'?'<span class="livebadge"><i></i>LIVE</span>':''}</div>
       <div class="b"><div class="t">${esc(v.title||v.source)}</div>
-      <div class="muted small" style="margin-top:4px">${v.clips?v.clips+' clips'+(v.approved?' · '+v.approved+' approved':''):busy?esc(v.stage||'Working'):v.status==='error'||v.error?'Needs attention':'No clips yet'}</div>
+      <div class="muted small" style="margin-top:4px">${v.clips?v.clips+' clips'+(v.approved?' · '+v.approved+' approved':''):busy?esc(v.stage||'Working'):v.status==='error'?'Needs attention':'No clips yet'}</div>
       ${busy?`<div class="bar" style="margin-top:7px"><i style="width:${Math.max(4,v.progress)}%"></i></div>`:''}</div>`},'vcard',
     el=>{el.setAttribute('role','button');el.tabIndex=0});
 }
@@ -246,17 +293,67 @@ function drawMain(){
       <div><button id="find" class="primary" style="width:100%">Find clips again</button></div></div>
       <p class="muted small" id="fitnote" style="margin:8px 0 0"></p></div>`:''}
     <div class="card map" id="mapbox" style="margin-top:14px"></div>
-    <div class="row" style="margin-bottom:2px"><h2 id="clipcount" style="flex:1"></h2><button id="appSel">Approve selected</button></div>
+    <div class="row" style="margin-bottom:6px;gap:8px;flex-wrap:wrap;align-items:center">
+      <h2 id="clipcount" style="flex:1;margin:0"></h2>
+      <button id="btnSelAll" class="ghost small">Select all</button>
+      <button id="appSel" class="small">Approve selected</button>
+      <button id="appAll" class="primary small">Approve all</button>
+      <button id="dlZip" class="ghost small" title="Download all rendered clips as a ZIP archive">Download .ZIP</button>
+    </div>
     <div id="cands"></div>`;
   $('#backLib').onclick=goLib;
   if($('#find')){const upd=()=>{const L=+$('#f_len').value||30;$('#fitnote').textContent=`At ${L} seconds each, this video fits up to ${Math.max(1,Math.floor((S.video.duration||0)/L))} clips.`};
     $('#f_len').oninput=upd;upd();$('#find').onclick=guard(findAgain)}
   if(live){$('#lv_clip').onclick=guard(async()=>{await send('POST','/api/live/'+S.vid+'/clip');toast('Cutting that moment…')});
     $('#lv_stop').onclick=guard(async()=>{$('#lv_stop').disabled=true;toast('Finishing the last clips…');await send('POST','/api/live/'+S.vid+'/stop');await tick()})}
-  $('#appSel').onclick=guard(async()=>{const ids=[...S.sel];if(!ids.length)return toast('Tick the clips you want first.',true);for(const id of ids)await approve(id,true);S.sel.clear();updateMain()});
+  $('#btnSelAll').onclick=()=>{
+    const allSelected=S.clips.length>0&&S.clips.every(k=>S.sel.has(k.id));
+    if(allSelected){
+      S.sel.clear();
+      $('#btnSelAll').textContent='Select all';
+    }else{
+      S.clips.forEach(k=>S.sel.add(k.id));
+      $('#btnSelAll').textContent='Deselect all';
+    }
+    drawCands();
+  };
+  $('#appSel').onclick=guard(async()=>{
+    const ids=[...S.sel];
+    if(!ids.length)return toast('Tick the clips you want first.',true);
+    toast(`Approving ${ids.length} clip${ids.length>1?'s':''}…`);
+    await send('POST','/api/clips/approve_batch',{ids});
+    for(const id of ids)S.autoDl.add(id);
+    S.sel.clear();
+    await loadClips();
+    toast('Selected clips approved and queued for download.');
+    updateMain();
+  });
+  $('#appAll').onclick=guard(async()=>{
+    if(!S.clips.length)return toast('No clips available to approve.',true);
+    toast(`Approving all ${S.clips.length} clips…`);
+    await send('POST','/api/videos/'+S.vid+'/approve_all');
+    for(const k of S.clips)S.autoDl.add(k.id);
+    await loadClips();
+    toast('All clips approved! They will download automatically as they finish.');
+    updateMain();
+  });
+  if($('#dlZip')){
+    $('#dlZip').onclick=()=>{
+      const done=S.clips.filter(k=>k.rendered&&k.render_status==='done');
+      if(!done.length)return toast('No rendered clips ready yet. Approve clips first and wait for them to finish rendering.',true);
+      toast(`Downloading ${done.length} clips as .ZIP…`);
+      const a=document.createElement('a');
+      a.href='/api/videos/'+S.vid+'/download_zip';
+      a.download='';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    };
+  }
   $('#cands').addEventListener('click',e=>{
     const cb=e.target.closest('[data-sel]');if(cb){e.stopPropagation();cb.checked?S.sel.add(+cb.dataset.sel):S.sel.delete(+cb.dataset.sel);return}
-    const r=e.target.closest('.cand');if(r)selectClip(+r.dataset.k)});
+    const eb=e.target.closest('[data-edit]');if(eb){e.stopPropagation();guard(()=>selectClip(+eb.dataset.edit))();return}
+    const r=e.target.closest('.cand');if(r)guard(()=>selectClip(+r.dataset.k))();});
 }
 async function findAgain(){
   const f=$('#f_chat').files[0];
@@ -272,7 +369,7 @@ function updateMain(){
   if(st==='busy'){swapText($('#stage'),v.stage||'Working');$('#pct').textContent=Math.round(v.progress);$('#pbar').style.width=Math.max(3,v.progress)+'%';$('#vtitle').textContent=v.title||''}
   if(st==='error'&&$('#errmsg'))$('#errmsg').textContent=v.error||'Something went wrong.';
   if(st==='ready'||st==='live'){
-    $('#vhead').innerHTML=`<h1 style="font-size:23px;letter-spacing:-.01em">${esc(v.title)}</h1><div class="muted small" style="margin-top:3px">${metaLine(v)}${v.kind==='live'&&st==='ready'?' · recording finished':''}${ruleBadge(v)}</div>
+    $('#vhead').innerHTML=`<h1 style="font-size:23px;letter-spacing:-.01em">${esc(v.title)}</h1><div class="muted small" style="margin-top:3px">${metaLine(v)}${v.kind==='live'&&st==='ready'?' · recording finished':''}</div>
       ${v.error?`<p style="color:var(--low);margin:8px 0 0" class="small">${esc(v.error)}</p>`:''}`;
     $('#clipcount').textContent=S.clips.length?`${S.clips.length} clip${S.clips.length>1?'s':''}, best first`:(st==='live'?'Clips appear here as moments happen':'No clips yet');
     drawMap();drawCands();
@@ -297,58 +394,59 @@ function drawMap(){
 }
 function scoreCol(s){return s>=.6?'var(--good)':s>=.35?'var(--mid)':'var(--low)'}
 function bar(label,val){return val==null?'':`<div>${label} ${Math.round(val*100)}<div class="bar"><i style="width:${Math.round(val*100)}%"></i></div></div>`}
-function stateBadge(k){return (k.qc&&k.qc.some(x=>x.level==='fail')?'<span class="pill err">Check quality</span> ':'')+stateBadge0(k)}
-function stateBadge0(k){
-  if(k.render_status==='running'||k.render_status==='queued')return `<span class="pill busy">${k.render_status==='queued'?'Waiting':'Preparing '+Math.round(k.render_progress)+'%'}</span>`;
-  if(k.render_status==='failed')return '<span class="pill err">Failed</span>';
-  if(k.status==='approved'&&k.rendered&&k.downloaded)return '<span class="pill ok">Saved to Downloads ✓</span>';
-  if(k.status==='approved'&&k.rendered)return '<span class="pill ok">Ready</span>';
-  if(k.status==='approved')return '<span class="pill ok">Approved</span>';
-  if(k.status==='rejected')return '<span class="pill">Rejected</span>';return '';
+const RULE={allowed:['Clipping allowed','ok'],tips:['Has clip tips','busy'],no:['No clipping','err'],unknown:['Rules unknown','']};
+function ruleBadge(v){const s=v.streamer;if(!s)return '';const[t,c]=RULE[s.status]||RULE.unknown;
+  return ` · <span class="pill ${c}" style="cursor:pointer" id="ruleBtn" title="Click to edit clipping permission">${esc(s.name)}: ${t}</span>`}
+function stateBadge(k){
+  const qcWarn = (k.qc&&k.qc.some(x=>x.level==='fail')) ? '<span class="pill err" style="background:#ef444433;color:#ef4444;border:1px solid #ef4444" title="Quality issue detected">⚠️ Check quality</span> ' : '';
+  if(k.render_status==='running'||k.render_status==='queued')return qcWarn + `<span class="pill busy">${k.render_status==='queued'?'Waiting':'Preparing '+Math.round(k.render_progress)+'%'}</span>`;
+  if(k.render_status==='failed')return qcWarn + '<span class="pill err">Failed</span>';
+  if(k.status==='approved'&&k.rendered&&k.downloaded)return qcWarn + '<span class="pill ok">Saved to Downloads ✓</span>';
+  if(k.status==='approved'&&k.rendered)return qcWarn + '<span class="pill ok">Ready</span>';
+  if(k.status==='approved')return qcWarn + '<span class="pill ok">Approved</span>';
+  if(k.status==='rejected')return qcWarn + '<span class="pill">Rejected</span>';return qcWarn;
 }
 function drawCands(){
   const box=$('#cands');if(!box)return;
+  const bAll=$('#btnSelAll');
+  if(bAll&&S.clips.length){
+    bAll.textContent=S.clips.every(k=>S.sel.has(k.id))?'Deselect all':'Select all';
+  }
   const ranks=new Map(S.clips.map((k,i)=>[k.id,i+1]));
-  sync(box,S.clips,k=>k.id,k=>[k.score,k.title,k.status,k.render_status,Math.round(k.render_progress||0),k.downloaded,k.id===S.cid,S.sel.has(k.id),k.start,k.end,k.stream_offset,ranks.get(k.id)].join('|'),k=>{
+  sync(box,S.clips,k=>k.id,k=>[k.score,k.title,k.status,k.render_status,Math.round(k.render_progress||0),k.downloaded,k.id===S.cid,S.sel.has(k.id),k.start,k.end,k.stream_offset,ranks.get(k.id),k.layout].join('|'),k=>{
     const sc=k.scores||{},C=2*Math.PI*21,pct=Math.round(k.score*100);
+    const layoutLabel=k.layout==='stack'?'🎮 Dual-Cam (2 screens)':(k.layout==='pip'?'🎮 PiP':'📱 '+esc(k.layout||'9:16'));
     return `<input type="checkbox" data-sel="${k.id}" ${S.sel.has(k.id)?'checked':''} aria-label="Select clip">
       <div class="rank">#${ranks.get(k.id)}</div>
       <div class="ring"><svg viewBox="0 0 52 52"><circle class="bg" cx="26" cy="26" r="21"/><circle class="fg" cx="26" cy="26" r="21" stroke="${scoreCol(k.score)}" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-k.score)}"/></svg><b style="color:${scoreCol(k.score)}">${pct}</b></div>
       <img class="cth" src="/api/clips/${k.id}/thumb?t=${k.start.toFixed(1)}_${k.end.toFixed(1)}" loading="lazy" alt="" onerror="this.style.visibility='hidden'">
-      <div style="min-width:0"><div class="ti">${esc(k.title)}</div><div class="muted small">${fmt(k.start+(k.stream_offset||0))}–${fmt(k.end+(k.stream_offset||0))} · ${Math.round(k.end-k.start)}s ${stateBadge(k)}</div></div>
+      <div style="min-width:0;flex:1"><div class="ti">${esc(k.title)}</div><div class="muted small">${fmt(k.start+(k.stream_offset||0))}–${fmt(k.end+(k.stream_offset||0))} · ${Math.round(k.end-k.start)}s ${stateBadge(k)} · <span style="color:#818cf8;font-weight:600">${layoutLabel}</span></div></div>
       <div class="mini">${bar('Sound',sc.audio)}${bar('Action',sc.motion)}${bar('Speech',sc.speech)}${bar('Chat',sc.chat)}${bar('Replays',sc.heat)}${bar('AI',sc.ai)}</div>
+      <button class="btnEdit small primary" data-edit="${k.id}" title="Edit framing, Dual-Cam, aspect ratio, captions & audio">✏️ Edit</button>
       ${(k.render_status==='running'||k.render_status==='queued')?`<div class="cprog"><i style="width:${Math.max(4,k.render_progress||0)}%"></i></div>`:''}`},'cand',
     (el,k)=>{el.classList.toggle('on',k.id===S.cid);el.classList.toggle('approved',k.status==='approved');el.classList.toggle('rejected',k.status==='rejected')});
 }
 async function loadClips(){
   if(!S.vid)return;S.clips=await api('/api/videos/'+S.vid+'/clips');
   if(S.cid){const k=S.clips.find(x=>x.id===S.cid);if(k){Object.assign(S.clip,k);updateApproveUI()}}
-  S.clips.forEach(k=>{if(S.autoDl.has(k.id)&&k.render_status==='done'&&k.rendered){S.autoDl.delete(k.id);startDownload(k.id);toast('Saved to your Downloads folder.')}
-    if(S.autoDl.has(k.id)&&k.render_status==='failed'){S.autoDl.delete(k.id);toast('That clip could not be made: '+(k.render_error||'unknown error'),true)}});
+  /* Don't auto-open the editor — let the user see the clip list first */
+  let dlDelay=0;
+  S.clips.forEach(k=>{
+    if(S.autoDl.has(k.id)&&k.render_status==='done'&&k.rendered){
+      S.autoDl.delete(k.id);
+      setTimeout(()=>startDownload(k.id), dlDelay);
+      dlDelay+=350;
+      toast('Saved clip to your Downloads folder.');
+    }
+    if(S.autoDl.has(k.id)&&k.render_status==='failed'){
+      S.autoDl.delete(k.id);
+      toast('That clip could not be made: '+(k.render_error||'unknown error'),true);
+    }
+  });
 }
 function startDownload(id){const a=document.createElement('a');a.href='/api/clips/'+id+'/download';a.download='';document.body.appendChild(a);a.click();a.remove()}
-const RULE={allowed:['Clipping allowed','ok'],tips:['Has clip tips','busy'],no:['No clipping','err'],unknown:['Rules unknown','']};
-function ruleBadge(v){const s=v.streamer;if(!s)return '';const[t,c]=RULE[s.status]||RULE.unknown;
-  return ` · ${esc(s.name)} <button class="pill ${c}" style="cursor:pointer" onclick="ruleEditor()" title="${esc(s.note||'What does this streamer say about clipping? Click to set it.')}">${t}</button>`}
-function ruleEditor(){
-  const s=S.video&&S.video.streamer;if(!s)return;
-  const m=document.createElement('div');m.className='modal';
-  m.innerHTML=`<div class="mbox stack" style="width:440px"><h2>Clip rules: ${esc(s.name)}</h2>
-    <p class="muted small" style="margin:0">What does this streamer say about people clipping their streams? Check their channel's About page or panels.</p>
-    <div class="seg" id="rst">${Object.entries(RULE).map(([k,[t]])=>`<button data-k="${k}" class="${k===s.status?'on':''}">${t}</button>`).join('')}</div>
-    <div><label for="rnote">Notes or link to their rules</label><textarea id="rnote" rows="3">${esc(s.note||'')}</textarea></div>
-    <div class="row"><button id="rNo" class="ghost">Cancel</button><button id="rOk" class="primary">Save</button></div></div>`;
-  document.body.appendChild(m);let st=s.status;
-  m.querySelectorAll('#rst button').forEach(b=>b.onclick=()=>{st=b.dataset.k;m.querySelectorAll('#rst button').forEach(x=>x.classList.toggle('on',x===b))});
-  m.querySelector('#rNo').onclick=()=>m.remove();m.onkeydown=e=>{if(e.key==='Escape')m.remove()};
-  m.querySelector('#rOk').onclick=guard(async()=>{await send('PUT','/api/rules',{key:s.key,status:st,note:m.querySelector('#rnote').value});
-    m.remove();S.videos=await api('/api/videos');S.video=S.videos.find(x=>x.id===S.vid)||S.video;S.mstate='';updateMain();toast('Clip rules saved for '+s.name+'.')});
-  m.querySelector('#rOk').focus();
-}
 async function approve(id,quiet){
-  const s=S.video&&S.video.streamer;let body;
-  if(s&&s.status==='no'){if(S.permOk!==S.vid&&!confirm(s.name+" doesn't allow clipping. Only go on if you have their permission. Do you?"))return;S.permOk=S.vid;body={permission:true}}
-  const r=await send('POST','/api/clips/'+id+'/approve',body);
+  const r=await send('POST','/api/clips/'+id+'/approve');
   if(r.needs_render){S.autoDl.add(id);if(!quiet)toast('Preparing your clip. It downloads when it is ready.')}
   else{startDownload(id);if(!quiet)toast('Saved to your Downloads folder.')}
   Object.assign(S.clip&&S.clip.id===id?S.clip:{},r.clip);await loadClips();updateMain();
@@ -366,10 +464,31 @@ async function pollLive(){
 }
 
 /* ---------------- editor ---------------- */
-function showEditor(on){$('#app').classList.toggle('noedit',!on);if(!on)$('#editor').innerHTML=''}
+function showEditor(on){
+  const v=$('#pv');
+  if(!on&&v){try{v.pause();v.removeAttribute('src');v.load()}catch{}}
+  $('#app').classList.toggle('noedit',!on);
+  const ed=$('#editor');
+  if(ed) ed.classList.toggle('studio-mode',!!on);
+  document.body.classList.toggle('studio-open',!!on);
+  if(!on&&ed) ed.innerHTML='';
+}
 async function selectClip(id){
-  if(!S.settings.langs)S.settings=await api('/api/settings');
-  S.cid=id;S.clip=await api('/api/clips/'+id);S.framing=null;await loadCues();showEditor(true);buildEditor();drawCands();drawMap();loadFraming();
+  try{
+    S.cid=id;
+    S.clip=await api('/api/clips/'+id);
+    S.vid=S.clip.video_id;
+    S.video=S.videos.find(v=>v.id===S.vid)||S.video;
+    S.framing=null;
+    try{await loadCues()}catch(e){S.cues=[]}
+    showEditor(true);
+    buildEditor();
+    drawCands();
+    drawMap();
+    try{await loadFraming()}catch(e){}
+    applyLayout();
+    if(window.innerWidth<=1100&&$('#editor')){$('#editor').scrollIntoView({behavior:'smooth'})}
+  }catch(e){toast('Error opening clip editor: '+e.message,true)}
 }
 async function loadCues(){S.cues=await api('/api/clips/'+S.cid+'/cues')}
 async function loadFraming(){
@@ -377,199 +496,1983 @@ async function loadFraming(){
   if(!S.clip||!['follow','stack','pip'].includes(S.clip.layout)){if(hint)hint.hidden=true;S.framing=null;applyLayout();return}
   if(hint){hint.hidden=false;hint.innerHTML='<span class="spin"></span>Finding the face'}
   try{const f=await api('/api/clips/'+id+'/framing');if(S.cid!==id)return;S.framing=f;
-    if(hint){hint.innerHTML=f.stack?(f.cam?(f.manual?'Your facecam box':f.pip?'Facecam over the gameplay':'Facecam on top, gameplay below'):'No facecam found, showing the whole gameplay'):f.pts.length?(f.found>.2?`Following the face (${Math.round(f.found*100)}% of the clip)`:'No clear face, using the center'):'Already vertical';setTimeout(()=>{if(hint)hint.hidden=true},3500)}}
+    if(hint){hint.innerHTML=f.manual?'Using the hand-drawn facecam box':f.stack?(f.cam?(f.pip?'Facecam over the gameplay':'Dual-Cam: Streamer on top, gameplay below'):'No facecam found, showing the whole gameplay'):f.pts.length?(f.found>.2?`Following the face (${Math.round(f.found*100)}% of the clip)`:'No clear face, using the center'):'Already vertical';setTimeout(()=>{if(hint)hint.hidden=true},3500)}
+    if($('#camEdit'))$('#camEdit').hidden=!['stack','pip'].includes(S.clip.layout);
+  }
   catch(e){if(hint)hint.hidden=true;toast(e.message,true)}
-  const ce=$('#camEdit');if(ce)ce.hidden=!(S.framing&&S.framing.stack);
   applyLayout();
 }
-// Draw the facecam box by hand when detection gets it wrong. One box per video: every clip of it uses it.
 function camEditor(){
-  const v=$('#pv'),f=S.framing;if(!v||!v.videoWidth||!f)return;
-  const W=Math.min(innerWidth-32,900),k=W/f.w,H=Math.round(f.h*k);
-  let b=(f.box||[f.w*.35,f.h*.05,f.w*.3,f.h*.3]).map(n=>n*k),drag=null;
-  const m=document.createElement('div');m.className='modal';
-  m.innerHTML=`<div class="mbox"><h2>Facecam box</h2><p class="muted small">Drag the box over the facecam. Drag the corner dot to resize. Every clip from this video uses it.</p>
-    <canvas id="camcv" width="${W}" height="${H}" style="touch-action:none"></canvas>
-    <div class="row" style="margin-top:10px"><button id="camAuto" class="ghost">Use automatic</button><span style="flex:1"></span><button id="camNo">Cancel</button><button id="camOk" class="primary">Save box</button></div></div>`;
+  const v=$('#pv');
+  if(!v)return;
+  const vw = v.videoWidth || (S.video && S.video.w) || 1280;
+  const vh = v.videoHeight || (S.video && S.video.h) || 720;
+  const f = S.framing || {};
+  const W = Math.min(innerWidth - 32, 900);
+  const k = W / vw, H = Math.round(vh * k);
+  let initial = f.box || (S.video && S.video.cam_box ? JSON.parse(S.video.cam_box) : null) || [Math.round(vw * 0.65), 0, Math.round(vw * 0.35), Math.round(vh * 0.45)];
+  let b = initial.map(n => n * k), drag = null;
+  const m = document.createElement('div'); m.className = 'modal';
+  m.innerHTML = `<div class="mbox" style="max-width:940px">
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h2 style="margin:0">🎯 Select Streamer Reaction Box</h2>
+      <button id="camCloseX" class="ghost" style="font-size:16px">✕</button>
+    </div>
+    <p class="muted small" style="margin:0 0 10px">Drag the blue box over the streamer's reaction camera in the video. Drag the corner dot to resize.</p>
+    <div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <span class="small" style="font-weight:700;display:flex;align-items:center">Presets:</span>
+      <button class="small" id="camSetTL">↖ Top-Left</button>
+      <button class="small" id="camSetTR">↗ Top-Right</button>
+      <button class="small" id="camSetBL">↙ Bottom-Left</button>
+      <button class="small" id="camSetBR">↘ Bottom-Right</button>
+      <button class="small" id="camSetCenter">🎯 Center</button>
+    </div>
+    <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;border:1px solid #334155">
+      <canvas id="camcv" width="${W}" height="${H}" style="touch-action:none;display:block;width:100%"></canvas>
+    </div>
+    <div class="row" style="margin-top:14px;gap:10px">
+      <button id="camAuto" class="ghost">Auto-detect</button>
+      <span style="flex:1"></span>
+      <button id="camNo" class="ghost">Cancel</button>
+      <button id="camOk" class="primary" style="font-weight:700">✓ Apply Streamer Box</button>
+    </div>
+  </div>`;
   document.body.appendChild(m);
-  const cv=m.querySelector('#camcv'),g=cv.getContext('2d');
-  const draw=()=>{g.drawImage(v,0,0,W,H);g.fillStyle='#0008';g.fillRect(0,0,W,H);g.drawImage(v,b[0]/k,b[1]/k,b[2]/k,b[3]/k,b[0],b[1],b[2],b[3]);
-    g.strokeStyle='#8c9bff';g.lineWidth=2;g.strokeRect(b[0],b[1],b[2],b[3]);g.fillStyle='#8c9bff';g.beginPath();g.arc(b[0]+b[2],b[1]+b[3],8,0,7);g.fill()};
-  const pt=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height]};
-  cv.onpointerdown=e=>{const[x,y]=pt(e);cv.setPointerCapture(e.pointerId);
-    drag=Math.hypot(x-b[0]-b[2],y-b[1]-b[3])<16?{rs:1}:(x>b[0]&&x<b[0]+b[2]&&y>b[1]&&y<b[1]+b[3])?{dx:x-b[0],dy:y-b[1]}:null};
-  cv.onpointermove=e=>{if(!drag)return;const[x,y]=pt(e),min=32*k;
-    if(drag.rs){b[2]=Math.min(Math.max(x-b[0],min),W-b[0]);b[3]=Math.min(Math.max(y-b[1],min),H-b[1])}
-    else{b[0]=Math.min(Math.max(x-drag.dx,0),W-b[2]);b[1]=Math.min(Math.max(y-drag.dy,0),H-b[3])}draw()};
-  cv.onpointerup=()=>drag=null;
-  const done=async box=>{await send('PATCH','/api/videos/'+S.vid,{cam_box:box});m.remove();S.framing=null;await loadClips();loadFraming();toast(box?'Facecam box saved for every clip of this video.':'Back to automatic facecam finding.')};
-  m.querySelector('#camOk').onclick=guard(()=>done(b.map(n=>Math.round(n/k))));
-  m.querySelector('#camAuto').onclick=guard(()=>done(null));
-  m.querySelector('#camNo').onclick=()=>m.remove();
-  m.onkeydown=e=>{if(e.key==='Escape')m.remove()};
-  draw();m.querySelector('#camOk').focus();
+  const cv = m.querySelector('#camcv'), g = cv.getContext('2d');
+  const draw = () => {
+    g.drawImage(v, 0, 0, W, H);
+    g.fillStyle = '#0008';
+    g.fillRect(0, 0, W, H);
+    g.drawImage(v, b[0] / k, b[1] / k, b[2] / k, b[3] / k, b[0], b[1], b[2], b[3]);
+    g.strokeStyle = '#8c9bff';
+    g.lineWidth = 2.5;
+    g.strokeRect(b[0], b[1], b[2], b[3]);
+    g.fillStyle = '#8c9bff';
+    g.beginPath();
+    g.arc(b[0] + b[2], b[1] + b[3], 9, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#fff';
+    g.font = 'bold 11px sans-serif';
+    g.fillText('Streamer Cam', b[0] + 6, b[1] + 16);
+  };
+  const pt = e => {
+    const r = cv.getBoundingClientRect();
+    return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height];
+  };
+  cv.onpointerdown = e => {
+    const [x, y] = pt(e);
+    cv.setPointerCapture(e.pointerId);
+    drag = Math.hypot(x - b[0] - b[2], y - b[1] - b[3]) < 20 ? { rs: 1 } : (x > b[0] && x < b[0] + b[2] && y > b[1] && y < b[1] + b[3]) ? { dx: x - b[0], dy: y - b[1] } : null;
+  };
+  cv.onpointermove = e => {
+    if (!drag) return;
+    const [x, y] = pt(e), min = 32 * k;
+    if (drag.rs) {
+      b[2] = Math.min(Math.max(x - b[0], min), W - b[0]);
+      b[3] = Math.min(Math.max(y - b[1], min), H - b[1]);
+    } else {
+      b[0] = Math.min(Math.max(x - drag.dx, 0), W - b[2]);
+      b[1] = Math.min(Math.max(y - drag.dy, 0), H - b[3]);
+    }
+    draw();
+  };
+  cv.onpointerup = () => drag = null;
+
+  m.querySelector('#camSetTL').onclick = () => { b = [0, 0, W * 0.35, H * 0.50]; draw(); };
+  m.querySelector('#camSetTR').onclick = () => { b = [W * 0.65, 0, W * 0.35, H * 0.50]; draw(); };
+  m.querySelector('#camSetBL').onclick = () => { b = [0, H * 0.45, W * 0.35, H * 0.55]; draw(); };
+  m.querySelector('#camSetBR').onclick = () => { b = [W * 0.65, H * 0.45, W * 0.35, H * 0.55]; draw(); };
+  m.querySelector('#camSetCenter').onclick = () => { b = [W * 0.325, 0, W * 0.35, H * 0.50]; draw(); };
+
+  const done = async box => {
+    const vid = S.vid || (S.clip && S.clip.video_id);
+    if(box){
+      if(S.video) S.video.cam_box = JSON.stringify(box);
+      await send('PATCH', '/api/videos/' + vid, { cam_box: box });
+      await save({ cam_corner: 'custom', cam_crop_x: 0.5, cam_crop_y: 0.5 });
+    } else {
+      if(S.video) S.video.cam_box = null;
+      await send('PATCH', '/api/videos/' + vid, { cam_box: null });
+      await save({ cam_corner: 'tr', cam_crop_x: 0.5, cam_crop_y: 0.5 });
+    }
+    m.remove();
+    S.framing = null;
+    await loadClips();
+    await loadFraming();
+    applyLayout();
+    toast(box ? 'Streamer camera box updated!' : 'Switched back to automatic camera finding.');
+  };
+  m.querySelector('#camOk').onclick = guard(() => done(b.map(n => Math.round(n / k))));
+  m.querySelector('#camAuto').onclick = guard(() => done(null));
+  m.querySelector('#camNo').onclick = () => m.remove();
+  m.querySelector('#camCloseX').onclick = () => m.remove();
+  m.onkeydown = e => { if (e.key === 'Escape') m.remove(); };
+  draw();
 }
 async function save(patch){
   const c=await send('PATCH','/api/clips/'+S.cid,patch);Object.assign(S.clip,c);await loadClips();drawCands();drawMap();updateApproveUI();return c;
 }
 const tplShadow=(t,px)=>{const o=Math.max(1,Math.round(t.ow*px*.55)),s=[];for(let x=-o;x<=o;x++)for(let y=-o;y<=o;y++)if(x||y)s.push(`${x}px ${y}px 0 ${t.outline}`);return s.join(',')};
 function buildEditor(){
-  const c=S.clip,el=$('#editor');
-  el.innerHTML=`<div class="ed"><div class="edbody stack">
-   <div class="row"><h2 style="flex:1">Edit clip</h2><button id="close" class="ghost" aria-label="Close editor">✕</button></div>
-   <div class="phone" id="phone"><video id="pv" playsinline preload="auto" muted></video><canvas id="stackcv" width="270" height="480" hidden></canvas><div id="cap"></div><div class="facehint" id="facehint" hidden></div></div>
-   <div class="row"><button id="play">Play</button><label style="margin:0" class="fit"><input type="checkbox" id="loop" checked> Loop</label><label style="margin:0" class="fit"><input type="checkbox" id="snd"> Sound</label></div>
-   <div><label>Trim: drag the ends, click to jump</label><div class="trim"><div class="trk" id="trk"><svg id="twave" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"></svg>
-     <div class="sel" id="tsel"><i data-h="s" title="Drag to set the start"></i><i data-h="e" title="Drag to set the end"></i></div><div id="tsfx"></div><div class="ph" id="tph"></div></div>
-     <div class="row muted small" style="margin-top:3px"><span id="tlo"></span><span id="tlen" style="text-align:center"></span><span id="thi" style="text-align:right"></span></div></div></div>
-   <div><label for="ask">Change it in plain words</label><div class="row"><input id="ask" placeholder="end 2 s earlier, split layout, title: …"><button id="askGo" class="fit">Change</button></div></div>
-   <div><label for="title">Title (not part of the captions)</label><input id="title" value="${esc(c.title)}"></div>
-   <div><label>Framing</label><div class="seg" id="layout"><button data-l="pip">Facecam over gameplay</button><button data-l="stack">Facecam + gameplay split</button><button data-l="follow">Follow the face</button><button data-l="crop">Center</button><button data-l="blur">Blurred fit</button></div>
-     <input id="cx" type="range" min="0" max="1" step="0.01" value="${c.crop_x}" style="margin-top:8px" ${['crop','stack','pip'].includes(c.layout)?'':'hidden'} aria-label="Crop position">
-     <button id="camEdit" class="fit" style="margin-top:8px" hidden>Adjust facecam box</button></div>
-   <div><label>Caption style</label><div class="styles" id="tpls"></div>
-     <label style="margin-top:8px"><input type="checkbox" id="capon" ${c.captions?'checked':''}> Burn captions into the video</label></div>
-   <div><label for="lang">Caption language</label><select id="lang"><option value="">As spoken</option>${Object.entries(S.settings.langs||{}).map(([k,n])=>`<option value="${k}" ${c.lang===k?'selected':''}>${esc(n)}</option>`).join('')}</select>
-     <p class="muted small" style="margin:6px 0 0">${S.settings.ai?'Translated by the AI editor when the clip is made. The preview shows the spoken words.':'Needs an AI key in Settings.'}</p></div>
-   <div><label for="vo">Voice-over (read aloud at the start)</label><div class="row"><input id="vo" value="${esc(c.vo||'')}" placeholder="Bro got WASTED in 2 seconds"><button id="voTitle" class="fit">Use title</button></div>
-     <p class="muted small" style="margin:6px 0 0">${S.settings.voice?'A computer voice reads it in the caption language. The game sound gets quieter while it talks.':'Install requirements-extras.txt to turn voice-over on.'}</p></div>
-   <div><label>Quality</label><div class="seg" id="res"><button data-r="1080">1080p</button><button data-r="1440">2K</button><button data-r="2160">4K</button></div></div>
-   <div class="row"><div><label for="music">Music</label><select id="music">${optList(S.audio.music,c.music,'None')}</select></div>
-     <div><label for="sfx1">Intro sound</label><select id="sfx1">${optList(S.audio.sfx,c.sfx_intro,'None')}</select></div></div>
-   <div><label>Sound effects</label>
-     <div class="row"><button id="sfxAuto" class="primary fit">Auto-add effects</button><select id="sfxPick" aria-label="Effect to add">${optList(S.audio.sfx,'whoosh.wav')}</select><button id="sfxAdd" class="fit">Add at playhead</button></div>
-     <p class="muted small" style="margin:6px 0 0">Auto-add puts a whoosh at the start, a riser and boom on the big moment and pops on reaction words. Turn on Sound to hear them in the preview.</p>
-     <div id="sfxList"></div></div>
-   <div class="tm"><div><label for="st">Start (s)</label><input id="st" type="number" step="0.1" value="${c.start.toFixed(1)}"><div class="nudge"><button data-n="st:-1">−1</button><button data-n="st:-.5">−.5</button><button data-n="st:.5">+.5</button><button id="stNow">Playhead</button></div></div>
-     <div><label for="en">End (s)</label><input id="en" type="number" step="0.1" value="${c.end.toFixed(1)}"><div class="nudge"><button data-n="en:-.5">−.5</button><button data-n="en:.5">+.5</button><button data-n="en:1">+1</button><button id="enNow">Playhead</button></div></div></div>
-   <p class="muted small" id="dur" style="margin:0"></p>
-   <div><label>Why this clip</label><ul class="why">${(c.reasons||[]).map(r=>`<li>${esc(r)}</li>`).join('')}</ul></div>
-   <div id="qcbox"></div>
-   <div><label for="post">Post text</label><textarea id="post" rows="5" placeholder="Loading…"></textarea>
-     <div class="row" style="margin-top:6px"><button id="postCopy" class="fit">Copy post text</button><button id="cover" class="fit" hidden>Download cover picture</button></div></div>
-   <div><label for="views">Views after posting</label><input id="views" type="number" min="0" value="${c.views??''}" placeholder="Type them in, or get them in Settings">
-     <p class="muted small" style="margin:6px 0 0">ClipForge learns from your best clips and ranks new ones like them.</p></div>
-   <hr><h2>Captions</h2><p class="muted small" style="margin:2px 0 0">Fix any word. Timing stays with the words you keep.</p><div id="cues"></div>
-  </div><div class="edfoot"><button id="reject" class="ghost">Reject</button><button id="approve" class="primary"><i class="fill"></i><span></span></button></div></div>`;
+  const c=S.clip, el=$('#editor');
+  el.innerHTML=`
+  <!-- Top Navigation & Controls Header -->
+  <div class="studio-head">
+    <div class="studio-title-badge">
+      <button id="closeStudio" class="studio-back-btn" title="Return to Clips Dashboard">← Back to Clips</button>
+      <input id="title" value="${esc(c.title)}" style="font-weight:700;font-size:14px;background:#0d111d;border:1px solid #2d3650;border-radius:6px;padding:4px 10px;width:240px" title="Edit Clip Title">
+      <span class="pill ok" id="studioDurBadge">${(c.end-c.start).toFixed(1)}s</span>
+    </div>
+    
+    <div class="studio-head-center">
+      <div class="seg" id="aspectRatio" title="Aspect Ratio">
+        <button data-aspect="9:16" class="${(c.aspect_ratio||'9:16')==='9:16'?'on':''}">📱 9:16</button>
+        <button data-aspect="1:1" class="${c.aspect_ratio==='1:1'?'on':''}">⬛ 1:1</button>
+        <button data-aspect="16:9" class="${c.aspect_ratio==='16:9'?'on':''}">🖥️ 16:9</button>
+      </div>
+      <div class="seg" id="res" title="Export Resolution">
+        <button data-r="1080">1080p</button>
+        <button data-r="1440">2K</button>
+        <button data-r="2160">4K</button>
+      </div>
+    </div>
+
+    <div class="studio-head-right">
+      <button id="reject" class="ghost danger" title="Discard this clip">Discard</button>
+      <button id="approve" class="studio-export-btn" title="Render and export clip">🚀 Approve & Export</button>
+    </div>
+  </div>
+
+  <!-- Studio Main Workspace: Left Tool Drawer + Center Video Monitor -->
+  <div class="studio-main">
+    
+    <!-- Left Sidebar: Multi-Tab Tool Drawer -->
+    <div class="studio-sidebar">
+      <div class="studio-tabs" id="studioTabs">
+        <button class="s-tab on" data-tab="cam">🎛️ Cam & Layout</button>
+        <button class="s-tab" data-tab="banner">🏷️ Hook Text</button>
+        <button class="s-tab" data-tab="captions">💬 Subtitles</button>
+        <button class="s-tab" data-tab="audio">🎵 Audio & SFX</button>
+        <button class="s-tab" data-tab="import">📁 PC Import</button>
+        <button class="s-tab" data-tab="ai">✨ Ask AI & Post</button>
+      </div>
+
+      <div class="studio-tab-content">
+        <!-- Panel 1: Cam & Framing -->
+        <div class="studio-panel on" id="spanel-cam">
+          <div>
+            <label>Framing Mode</label>
+            <div class="seg" id="layout">
+              <button data-l="stack">🎮 Dual-Cam Split</button>
+              <button data-l="pip">🎮 Floating Cam (Draggable)</button>
+              <button data-l="follow">Follow Face</button>
+              <button data-l="crop">Center Crop</button>
+              <button data-l="blur">Blurred Fit</button>
+            </div>
+            <p class="muted small" style="margin:4px 0 0" id="layoutDesc"><b>Dual-Cam Split:</b> Splits vertically into 2 screens. Top captures streamer reaction, bottom captures gameplay.</p>
+          </div>
+
+          <!-- Dual-Cam Split Ratio (Top / Bottom) -->
+          <div id="dualSplitBox" style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0;font-weight:700">Dual-Cam Split Ratio:</label>
+              <b id="splitVal" style="color:var(--accent);font-size:13px">${Math.round((c.split_ratio || 0.5) * 100)}% Top / ${Math.round((1 - (c.split_ratio || 0.5)) * 100)}% Bottom</b>
+            </div>
+            <div class="seg" id="splitPresets" style="margin:6px 0">
+              <button data-split="0.5" class="${(c.split_ratio||0.5)===0.5?'on':''}">50 / 50</button>
+              <button data-split="0.45" class="${c.split_ratio===0.45?'on':''}">45 / 55</button>
+              <button data-split="0.4" class="${c.split_ratio===0.4?'on':''}">40 / 60</button>
+              <button data-split="0.35" class="${c.split_ratio===0.35?'on':''}">35 / 65</button>
+              <button data-split="0.6" class="${c.split_ratio===0.6?'on':''}">60 / 40</button>
+            </div>
+            <input id="splitRatio" type="range" min="0.25" max="0.75" step="0.05" value="${c.split_ratio || 0.5}">
+            <div class="row muted small"><span>25% Top</span><span style="flex:1;text-align:center">50% Equal Split</span><span>75% Top</span></div>
+            <button id="swapDualScreens" class="ghost fit" style="width:100%;font-size:12px;padding:6px;margin-top:8px">🔄 Swap: ${['bottom','bl','br','bc'].includes(c.cam_pos)?'Gameplay Top / Streamer Bottom':'Streamer Top / Gameplay Bottom'}</button>
+          </div>
+
+          <!-- Streamer Camera Source Selection -->
+          <div class="card" style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px">
+            <label style="margin:0;font-weight:700">Select Where Streamer Is in the Video:</label>
+            <div class="snap-grid" id="snapGrid" style="margin:6px 0">
+              <button data-snap="tl" class="${c.cam_corner==='tl'?'on':''}">↖ Top-Left</button>
+              <button data-snap="tr" class="${(c.cam_corner==='tr'||!c.cam_corner)?'on':''}">↗ Top-Right (Kai/Jynxzi)</button>
+              <button data-snap="bl" class="${c.cam_corner==='bl'?'on':''}">↙ Bottom-Left (Speed)</button>
+              <button data-snap="br" class="${c.cam_corner==='br'?'on':''}">↘ Bottom-Right</button>
+              <button data-snap="tc" class="${c.cam_corner==='tc'?'on':''}">⬆ Top-Center</button>
+              <button data-snap="bc" class="${c.cam_corner==='bc'?'on':''}">⬇ Bottom-Center</button>
+            </div>
+            <button id="camEdit" class="primary fit" style="width:100%;margin-top:6px;font-weight:700;padding:7px 10px">🎯 Drag & Select Streamer Box on Video</button>
+            <div class="cam-drag-tip" style="margin-top:6px">💡 Click ↙ Bottom-Left (Speed) or Drag & Select to outline exact webcam box!</div>
+          </div>
+
+          <!-- Streamer Camera Zoom & Framing -->
+          <div class="card" style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0;font-weight:700">Streamer Cam Zoom: <b id="zoomVal" style="color:var(--accent)">${Math.round((c.cam_zoom || 1.0) * 100)}%</b></label>
+              <div class="row fit" style="gap:4px">
+                <button id="camZoomOut" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Zoom out streamer">🔍−</button>
+                <button id="camZoomReset" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Reset streamer zoom">1.0x</button>
+                <button id="camZoomIn" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Zoom in streamer">🔍+</button>
+              </div>
+            </div>
+            <input id="camZoom" type="range" min="0.4" max="3.0" step="0.05" value="${c.cam_zoom || 1.0}">
+            <div class="row muted small"><span>0.4x Wide</span><span style="flex:1;text-align:center">1.0x Normal</span><span>3.0x Close</span></div>
+
+            <div style="margin-top:8px">
+              <label style="font-size:11.5px;margin-bottom:2px">Streamer Framing Pan (X / Y)</label>
+              <div class="row" style="gap:8px">
+                <div style="flex:1"><small class="muted" style="font-size:10px">Pan X</small><input id="camPanX" type="range" min="0" max="1" step="0.01" value="${c.cam_crop_x ?? 0.5}"></div>
+                <div style="flex:1"><small class="muted" style="font-size:10px">Pan Y</small><input id="camPanY" type="range" min="0" max="1" step="0.01" value="${c.cam_crop_y ?? 0.5}"></div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label>Cam Frame Shape</label>
+            <div class="seg" id="camShape">
+              <button data-shape="rect" class="${(c.cam_shape||'rect')==='rect'?'on':''}">⬛ Rectangle Frame</button>
+              <button data-shape="circle" class="${c.cam_shape==='circle'?'on':''}">⭕ Circle Frame</button>
+            </div>
+          </div>
+
+          <!-- Gameplay Screen Zoom & Pan Controls -->
+          <div class="card" style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0;font-weight:700">Gameplay Screen Zoom: <b id="gameZoomVal" style="color:var(--accent)">${Math.round((c.game_zoom || 1.0) * 100)}%</b></label>
+              <div class="row fit" style="gap:4px">
+                <button id="gameZoomOut" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Zoom out gameplay">🔍−</button>
+                <button id="gameZoomReset" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Reset gameplay zoom">1.0x</button>
+                <button id="gameZoomIn" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Zoom in gameplay">🔍+</button>
+              </div>
+            </div>
+            <input id="gameZoom" type="range" min="0.4" max="3.0" step="0.05" value="${c.game_zoom || 1.0}">
+            <div class="row muted small"><span>0.4x Wide</span><span style="flex:1;text-align:center">1.0x Normal</span><span>3.0x Close</span></div>
+
+            <div style="margin-top:8px">
+              <label style="font-size:11.5px;margin-bottom:2px">Gameplay Screen Pan (X / Y)</label>
+              <div class="row" style="gap:8px">
+                <div style="flex:1"><small class="muted" style="font-size:10px">Pan X</small><input id="cx" type="range" min="0" max="1" step="0.01" value="${c.crop_x ?? 0.5}" aria-label="Gameplay horizontal crop position"></div>
+                <div style="flex:1"><small class="muted" style="font-size:10px">Pan Y</small><input id="cy" type="range" min="0" max="1" step="0.01" value="${c.crop_y ?? 0.5}" aria-label="Gameplay vertical crop position"></div>
+              </div>
+            </div>
+          </div>
+          <div class="cam-drag-tip" style="margin-top:2px">💡 Tip: In the preview monitor, you can use your mouse wheel over either screen to zoom in/out, or click & drag to pan!</div>
+        </div>
+
+        <!-- Panel 2: Viral Hook Text -->
+        <div class="studio-panel" id="spanel-banner">
+          <div>
+            <label for="bannerText">Hook / Viral Headline Text (Top of Clip)</label>
+            <input id="bannerText" placeholder="e.g. One of the peak streams of his career.... 😂💀" value="${esc(c.banner_text || '')}">
+            <div class="preset-chips" id="presetChips">
+              <button data-txt="One of the peak streams of his career.... 😂💀">Peak stream 😂💀</button>
+              <button data-txt="WAIT TILL THE END 😱🔥">WAIT TILL THE END 😱</button>
+              <button data-txt="SPEED COULD NOT BELIEVE THIS 😭">SPEED CAN'T BELIEVE 😭</button>
+              <button data-txt="BRO DID NOT JUST DO THAT 💀">BRO DID NOT 💀</button>
+              <button data-txt="WATCH TILL THE VERY END ⚠️">WATCH TILL END ⚠️</button>
+            </div>
+            <div class="row small" style="margin-top:8px;align-items:center;gap:8px">
+              <span id="bannerWhen" class="muted" style="flex:1"></span>
+              <button id="bannerWhole" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Show the text for the whole clip">Whole clip</button>
+            </div>
+            <p class="muted small" style="margin:4px 0 0">To show it for only part of the clip, drag the yellow Hook Card bar on the timeline, or drag its ends.</p>
+          </div>
+
+          <!-- Text Size Scaling -->
+          <div style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0;font-weight:700">Text Size: <b id="bannerSizeVal" style="color:var(--accent)">${Math.round((c.banner_size || 1.0) * 100)}%</b></label>
+              <div class="row fit" style="gap:4px">
+                <button id="bannerSizeDown" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Make text smaller">🔍−</button>
+                <button id="bannerSizeReset" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Reset text size">1.0x</button>
+                <button id="bannerSizeUp" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Make text bigger">🔍+</button>
+              </div>
+            </div>
+            <input id="bannerSize" type="range" min="0.5" max="3.0" step="0.05" value="${c.banner_size || 1.0}">
+            <div class="row muted small"><span>0.5x Small</span><span style="flex:1;text-align:center">1.0x Normal</span><span>3.0x Huge</span></div>
+          </div>
+
+          <!-- Font Design -->
+          <div>
+            <label>Font Design</label>
+            <div class="seg" id="bannerFont">
+              <button data-bf="Impact" class="${(c.banner_font||'Impact')==='Impact'?'on':''}" style="font-family:Impact,sans-serif">IMPACT</button>
+              <button data-bf="Montserrat" class="${c.banner_font==='Montserrat'?'on':''}" style="font-family:Montserrat,sans-serif;font-weight:800">Montserrat</button>
+              <button data-bf="Arial Black" class="${c.banner_font==='Arial Black'?'on':''}" style="font-family:'Arial Black',sans-serif">Arial Black</button>
+              <button data-bf="Poppins" class="${c.banner_font==='Poppins'?'on':''}" style="font-family:Poppins,sans-serif;font-weight:800">Poppins</button>
+              <button data-bf="Comic Sans MS" class="${c.banner_font==='Comic Sans MS'?'on':''}" style="font-family:'Comic Sans MS',sans-serif">Comic</button>
+            </div>
+          </div>
+
+          <div>
+            <label>Title Card Position (Drag on screen or pick preset)</label>
+            <div class="preset-chips" id="bannerPosChips">
+              <button data-pos="top">⬆️ Top Hook</button>
+              <button data-pos="middle">↕️ Center Screen</button>
+              <button data-pos="bottom">⬇️ Bottom Hook</button>
+            </div>
+            <p class="muted small" style="margin:4px 0 0">✨ <b>Draggable Anywhere:</b> You can grab and move the title card anywhere on the video preview screen!</p>
+          </div>
+
+          <div>
+            <label>Text Background Style</label>
+            <div class="seg" id="bannerStyle">
+              <button data-bs="clean_text" class="${c.banner_style==='clean_text'?'on':''}">✨ No Box (Transparent)</button>
+              <button data-bs="yellow_text" class="${c.banner_style==='yellow_text'?'on':''}">💛 Yellow (No Box)</button>
+              <button data-bs="white_box" class="${(c.banner_style||'white_box')==='white_box'?'on':''}">📄 White Card</button>
+              <button data-bs="dark_box" class="${c.banner_style==='dark_box'?'on':''}">⬛ Dark Box</button>
+              <button data-bs="neon" class="${c.banner_style==='neon'?'on':''}">⚡ Neon</button>
+              <button data-bs="none" class="${c.banner_style==='none'?'on':''}">🚫 Hidden</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel 3: Subtitles & Captions -->
+        <div class="studio-panel" id="spanel-captions">
+          <div>
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0">Caption Style Preset</label>
+              <button id="dlSrtBtn" class="ghost fit" style="font-size:11.5px;padding:3px 8px" title="Download standard SRT subtitle file">📥 Download Subtitles (.SRT)</button>
+            </div>
+            <div class="styles" id="tpls" style="margin-top:6px"></div>
+            <div class="row" style="margin-top:8px;gap:12px;flex-wrap:wrap">
+              <label style="margin:0" class="fit"><input type="checkbox" id="capon" ${c.captions?'checked':''}> Burn captions</label>
+              <label style="margin:0" class="fit"><input type="checkbox" id="hookzoom" ${c.hook_zoom!==0?'checked':''}> ⚡ 3s Hook Zoom</label>
+              <label style="margin:0" class="fit"><input type="checkbox" id="censor" ${c.censor?'checked':''}> 🤬 Censor swear words</label>
+            </div>
+          </div>
+
+          <!-- Subtitle Font Size Scaling -->
+          <div style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px;margin-top:8px">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0;font-weight:700">Subtitle Size: <b id="capSizeVal" style="color:var(--accent)">${Math.round((c.caption_size || 1.0) * 100)}%</b></label>
+              <div class="row fit" style="gap:4px">
+                <button id="capSizeDown" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Make subtitle smaller">🔍−</button>
+                <button id="capSizeReset" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Reset subtitle size">1.0x</button>
+                <button id="capSizeUp" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Make subtitle larger">🔍+</button>
+              </div>
+            </div>
+            <input id="capSize" type="range" min="0.5" max="3.0" step="0.05" value="${c.caption_size || 1.0}">
+            <div class="row muted small"><span>0.5x Small</span><span style="flex:1;text-align:center">1.0x Normal</span><span>3.0x Huge</span></div>
+          </div>
+
+          <!-- Subtitle Font Style -->
+          <div style="margin-top:8px">
+            <label>Subtitle Font Design</label>
+            <div class="seg" id="capFont">
+              <button data-cf="Arial" class="${(!c.caption_font || c.caption_font==='Arial')?'on':''}">Arial</button>
+              <button data-cf="Impact" class="${c.caption_font==='Impact'?'on':''}" style="font-family:Impact,sans-serif">IMPACT</button>
+              <button data-cf="Montserrat" class="${c.caption_font==='Montserrat'?'on':''}" style="font-family:Montserrat,sans-serif;font-weight:800">Montserrat</button>
+              <button data-cf="Arial Black" class="${c.caption_font==='Arial Black'?'on':''}" style="font-family:'Arial Black',sans-serif">Black</button>
+              <button data-cf="Comic Sans MS" class="${c.caption_font==='Comic Sans MS'?'on':''}" style="font-family:'Comic Sans MS',sans-serif">Comic</button>
+            </div>
+          </div>
+
+          <!-- Translation & Voice-over -->
+          <div style="margin-top:8px">
+            <label for="lang">Translate Captions</label>
+            <select id="lang">
+              <option value="">As spoken</option>
+              ${Object.entries(S.settings.langs||{}).map(([k,n])=>`<option value="${k}" ${c.lang===k?'selected':''}>${esc(n)}</option>`).join('')}
+            </select>
+            <p class="muted small" style="margin:4px 0 0">${S.settings.ai?'Translated by the AI editor when exported. Preview shows spoken words.':'Needs an AI key in Settings.'}</p>
+          </div>
+          <div style="margin-top:8px">
+            <label for="vo">Voice-over (Read aloud at the start)</label>
+            <div class="row">
+              <input id="vo" value="${esc(c.vo||'')}" placeholder="Bro got WASTED in 2 seconds">
+              <button id="voTitle" class="fit">Use title</button>
+            </div>
+            <p class="muted small" style="margin:4px 0 0">${S.settings.voice?'A computer voice reads it in the caption language.':'Install requirements-extras.txt for voice-over.'}</p>
+          </div>
+          <div style="margin-top:8px">
+            <label for="views">Views after posting</label>
+            <input id="views" type="number" min="0" value="${c.views??''}" placeholder="Type views count, or get them in Settings">
+            <p class="muted small" style="margin:4px 0 0">ClipForge learns from your best clips and ranks new ones like them.</p>
+          </div>
+
+          <hr>
+          <h3 style="margin:4px 0">Word-by-word Subtitles</h3>
+          <p class="muted small" style="margin:2px 0 6px">Click any word to jump to that moment.</p>
+          <div id="cues"></div>
+        </div>
+
+        <!-- Panel 4: Audio & Built-in SFX -->
+        <div class="studio-panel" id="spanel-audio">
+          <div class="row">
+            <div><label for="music">Music</label><select id="music">${optList(S.audio.music,c.music,'None')}</select></div>
+            <div><label for="sfx1">Intro Hook SFX</label><select id="sfx1">${optList(S.audio.sfx,c.sfx_intro,'None')}</select></div>
+          </div>
+          <div class="row">
+            <div><label for="sfx2">Peak SFX (Deep 808/Boom)</label><select id="sfx2">${optList(S.audio.sfx,c.sfx_peak,'Auto Deep Drop')}</select></div>
+          </div>
+
+          <div>
+            <div class="row" style="margin-bottom:8px">
+              <button id="sfxAuto" class="primary fit" style="flex:1">⚡ Auto-add Smart SFX</button>
+            </div>
+            <div class="row">
+              <select id="sfxPick" style="flex:2">${optList(S.audio.sfx,'whoosh.wav')}</select>
+              <button id="sfxAdd" class="fit" style="flex:1">Add at playhead</button>
+            </div>
+            <p class="muted small" style="margin:6px 0 0">Puts sound effects directly into the bottom timeline track.</p>
+            <div id="sfxList" style="margin-top:10px"></div>
+          </div>
+        </div>
+
+        <!-- Panel 5: PC Import -->
+        <div class="studio-panel" id="spanel-import">
+          <label>Import Audio / Effects from PC</label>
+          <div class="upload-card" id="pcAudioDrop">
+            <input type="file" id="pcAudioFile" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac">
+            <div style="font-size:28px;margin-bottom:6px">📁</div>
+            <b>Click or Drag audio files from your PC</b>
+            <p class="muted small" style="margin:4px 0 10px">Supports .mp3, .wav, .m4a, .aac, .ogg</p>
+            <div class="seg" id="importKind" style="max-width:240px;margin:0 auto">
+              <button data-k="sfx" class="on">Sound Effect (SFX)</button>
+              <button data-k="music">Music Track</button>
+            </div>
+          </div>
+          <div id="pcUploadedSection" style="margin-top:12px">
+            <label>Recently Added Sounds</label>
+            <div id="pcUploadedList" class="stack"></div>
+          </div>
+        </div>
+
+        <!-- Panel 6: Ask AI & Post -->
+        <div class="studio-panel" id="spanel-ai">
+          <div class="card" style="background:#131828;border:1px solid #2d3748;padding:12px;border-radius:8px">
+            <label style="margin:0;font-weight:700">✨ Change Clip in Plain Words (Ask AI)</label>
+            <p class="muted small" style="margin:4px 0 8px">Say what to change in simple English:</p>
+            <div class="row" style="gap:6px">
+              <input id="ask" placeholder="e.g. end 2s earlier, split layout, title: Epic Win" style="flex:1">
+              <button id="askGo" class="fit primary" style="font-weight:600">Change</button>
+            </div>
+            <p class="muted small" style="margin:6px 0 0;font-size:11px">Examples: "end 2 s earlier", "start 3 s later", "title: Watch this", "split layout", "4k".</p>
+          </div>
+
+          <div id="qcbox" style="margin-top:10px"></div>
+
+          <div class="card" style="background:#131828;border:1px solid #2d3748;padding:12px;border-radius:8px;margin-top:10px">
+            <label style="margin:0;font-weight:700">📋 Ready-to-Paste Post Text</label>
+            <p class="muted small" style="margin:4px 0 6px">Includes title, streamer credit, and hashtags:</p>
+            <textarea id="post" rows="4" style="width:100%;font-size:12px;resize:vertical" placeholder="Loading post text..."></textarea>
+            <div class="row" style="margin-top:8px;gap:8px">
+              <button id="postCopy" class="fit" style="font-size:12px">Copy Post Text</button>
+              <button id="cover" class="fit" style="font-size:12px" hidden>Download Cover Image</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center Monitor Viewport -->
+    <div class="studio-monitor-wrap">
+      <div class="studio-phone" id="phone">
+        <video id="pv" playsinline preload="auto" muted></video>
+        <canvas id="stackcv" width="270" height="480"></canvas>
+        <div id="bannerBox" class="bannerBox" hidden></div>
+        <div id="cap"></div>
+        <div class="facehint" id="facehint" hidden></div>
+      </div>
+
+      <!-- Monitor Transport Bar -->
+      <div class="studio-transport">
+        <button id="stepBack" class="transport-btn" title="Back 0.5s">⏪</button>
+        <button id="play" class="transport-btn play" title="Play / Pause (Space)">▶</button>
+        <button id="stepFwd" class="transport-btn" title="Forward 0.5s">⏩</button>
+        <span class="transport-time" id="timeCode">00:00.0 / 00:00.0</span>
+        <label style="margin:0;display:flex;align-items:center;gap:4px;font-size:12px" class="fit">
+          <input type="checkbox" id="loop" checked> Loop
+        </label>
+        <label style="margin:0;display:flex;align-items:center;gap:4px;font-size:12px" class="fit">
+          <input type="checkbox" id="snd"> Sound
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Multi-Track Studio Timeline -->
+  <div class="studio-timeline">
+    <div class="timeline-bar">
+      <div style="font-weight:700;font-size:12px;color:var(--text);display:flex;align-items:center;gap:8px">
+        <span>🎬 Studio Timeline</span>
+        <span class="muted small" id="dur"></span>
+      </div>
+      <div class="timeline-tools" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <div class="seg" id="tlViewSeg" style="margin:0" title="Zoom timeline into clip or out to whole video">
+          <button id="tlViewClip" class="on" style="padding:2px 8px;font-size:11px">🔍 Clip View</button>
+          <button id="tlViewFull" style="padding:2px 8px;font-size:11px">🌐 Whole Video</button>
+        </div>
+        <div class="row fit" style="gap:2px">
+          <button id="trimStartMinus" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Start 1s earlier">◀ −1s</button>
+          <button id="stNow" class="primary fit" title="Set Start / In-Point to Playhead" style="padding:2px 7px;font-size:11px;font-weight:700">[ Set In</button>
+          <button id="cutSplitBtn" class="fit" style="background:#ef4444;color:#fff;border:none;padding:2px 8px;font-size:11px;font-weight:700;cursor:pointer;border-radius:4px" title="Cut clip at current playhead">✂️ Cut Here</button>
+          <button id="enNow" class="primary fit" title="Set End / Out-Point to Playhead" style="padding:2px 7px;font-size:11px;font-weight:700">Set Out ]</button>
+          <button id="trimEndPlus" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Extend end 1s longer">+1s ▶</button>
+        </div>
+        <div class="row fit" style="gap:4px;align-items:center;background:#0f172a;padding:2px 6px;border-radius:6px;border:1px solid #334155;font-size:11px">
+          <span>In:</span>
+          <input id="inStartSec" style="width:46px;background:#1e293b;border:1px solid #475569;border-radius:4px;color:#fff;text-align:center;padding:1px 2px;font-size:11px" title="Clip start in seconds">
+          <span>Out:</span>
+          <input id="inEndSec" style="width:46px;background:#1e293b;border:1px solid #475569;border-radius:4px;color:#fff;text-align:center;padding:1px 2px;font-size:11px" title="Clip end in seconds">
+          <span style="margin-left:2px;font-weight:700;color:#94a3b8">Len:</span>
+          <input id="inLenSec" style="width:46px;background:#1e293b;border:1px solid #4ade80;border-radius:4px;color:#4ade80;font-weight:700;text-align:center;padding:1px 2px;font-size:11px" title="Clip length in seconds (change to adjust length)">
+          <button id="lenMinus5" class="ghost fit" style="padding:1px 4px;font-size:10px" title="Shorten length by 5s">−5s</button>
+          <button id="lenPlus5" class="ghost fit" style="padding:1px 4px;font-size:10px" title="Extend length by 5s">+5s</button>
+          <span id="clipLenBadge" style="color:#4ade80;font-weight:700;display:none">0.0s</span>
+        </div>
+        <button id="sfxAddPlayhead" class="primary" style="padding:2px 8px;font-size:11px" title="Add selected SFX at playhead">➕ Add SFX</button>
+      </div>
+    </div>
+
+    <div class="timeline-workspace">
+      <!-- Track Header Labels -->
+      <div class="timeline-labels">
+        <div class="tl-label ruler">⏱️ Time</div>
+        <div class="tl-label trk-video">🎬 Video & Cam</div>
+        <div class="tl-label trk-hook">🏷️ Hook Card</div>
+        <div class="tl-label trk-subs">💬 Subtitles</div>
+        <div class="tl-label trk-audio">🎵 SFX & Audio</div>
+      </div>
+
+      <!-- Interactive Canvas & Tracks Wrap -->
+      <div class="timeline-canvas-wrap" id="tlCanvasWrap">
+        <!-- Ruler Track -->
+        <div class="tl-ruler-track" id="tlRuler"></div>
+
+        <!-- Track 1: Video Waveform & Range -->
+        <div class="tl-video-track" id="tlVideoTrack">
+          <svg id="twave" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <div class="tl-video-range" id="tsel">
+            <div class="tl-handle" data-h="s" title="Drag to adjust Start time"></div>
+            <div class="tl-handle" data-h="e" title="Drag to adjust End time"></div>
+          </div>
+        </div>
+
+        <!-- Track 2: Viral Hook Text Strip -->
+        <div class="tl-hook-track" id="tlHookTrack">
+          <div class="tl-hook-strip" id="tlHookStrip" hidden title="Drag to move the text in time. Drag the ends to change how long it shows.">
+            <i class="tl-bh" data-bh="s"></i><span id="tlHookText">🏷️ Viral Hook</span><i class="tl-bh" data-bh="e"></i>
+          </div>
+        </div>
+
+        <!-- Track 3: Subtitles & Speech Blocks -->
+        <div class="tl-subs-track" id="tlSubsTrack">
+          <div id="tlSubs" style="position:relative;width:100%;height:100%"></div>
+        </div>
+
+        <!-- Track 4: Audio & Draggable SFX Chips -->
+        <div class="tl-audio-track" id="tlAudioTrack">
+          <div id="tsfx" style="position:relative;width:100%;height:100%"></div>
+        </div>
+
+        <!-- Red Timeline Playhead Needle -->
+        <div class="tl-playhead" id="tph"></div>
+      </div>
+    </div>
+  </div>
+  `;
+
+  // Render Caption Styles
   $('#tpls').innerHTML=Object.entries(S.tpl).map(([n,t])=>`<button class="style ${n===c.template?'on':''}" data-t="${n}"><span class="s" style="color:${t.active};text-shadow:${t.box?'none':tplShadow(t,.08)};${t.box?'background:#000b;border-radius:4px;padding:0 4px':''}">${t.upper?'WORD':'Word'}</span><small>${n.replace(/_/g,' ')}</small></button>`).join('');
-  const v=$('#pv');v.src='/api/clips/'+c.id+'/source#t='+c.start;
-  v.addEventListener('loadedmetadata',()=>{v.currentTime=S.clip.start;drawCaption();applyLayout();drawTrim()});
-  v.addEventListener('timeupdate',onTime);v.addEventListener('seeked',()=>{drawCaption();applyLayout()});
-  v.addEventListener('play',()=>{$('#play').textContent='Pause';(function loop(){drawCaption();applyLayout();drawPh();sfxTick();if(!v.paused)requestAnimationFrame(loop)})()});
-  v.addEventListener('pause',()=>$('#play').textContent='Play');
-  sizePhone();markSeg();drawCues();updateApproveUI();updDur();drawTrim();trimEvents();
-  $('#close').onclick=()=>{S.cid=null;S.clip=null;showEditor(false);drawCands();drawMap()};
-  $('#play').onclick=playClip;$('#snd').onchange=e=>v.muted=!e.target.checked;
-  const ask=guard(async()=>{const t=$('#ask').value.trim();if(!t)return;const r=await send('POST','/api/clips/'+S.cid+'/ask',{text:t});
-    toast('Changed: '+Object.keys(r.changed).join(', ')+'.');await loadClips();await selectClip(S.cid)});
-  $('#askGo').onclick=ask;$('#ask').onkeydown=e=>{if(e.key==='Enter')ask()};
-  api('/api/clips/'+c.id+'/post').then(r=>{if(S.cid===c.id)$('#post').value=r.text}).catch(()=>{});
-  $('#postCopy').onclick=guard(async()=>{const t=$('#post');try{await navigator.clipboard.writeText(t.value)}catch{t.select();document.execCommand('copy')}toast('Post text copied.')});
-  $('#cover').onclick=()=>{const a=document.createElement('a');a.href='/api/clips/'+S.cid+'/cover';a.download='';document.body.appendChild(a);a.click();a.remove()};
+
+  const v=$('#pv');
+  v.src='/api/clips/'+c.id+'/source#t='+c.start;
+  const onReady=()=>{ applyLayout(); drawCaption(); drawBanner(); drawTrim(); updateTimeCode(); };
+  v.addEventListener('loadedmetadata',()=>{
+    const isFull = v.duration && v.duration > (S.clip.end - S.clip.start) + 2.5;
+    if(isFull && v.currentTime < S.clip.start) v.currentTime = S.clip.start;
+    onReady();
+  });
+  v.addEventListener('loadeddata', onReady);
+  v.addEventListener('canplay', onReady);
+  v.addEventListener('timeupdate',()=>{ onTime(); updateTimeCode(); });
+  v.addEventListener('seeking',()=>{ applyLayout(); updateTimeCode(); });
+  v.addEventListener('seeked', onReady);
+  v.addEventListener('play',()=>{$('#play').textContent='⏸';(function loop(){drawCaption();drawBanner();applyLayout();drawPh();sfxTick();if(!v.paused)requestAnimationFrame(loop)})()});
+  v.addEventListener('pause',()=>{$('#play').textContent='▶'; onReady();});
+
+  markSeg();drawCues();updateApproveUI();updDur();drawTrim();trimEvents();drawBanner();initBannerDrag();initCanvasDrag();initTimelineTracks();initHookDrag();initPcUpload();
+  if($('#bannerWhole'))$('#bannerWhole').onclick=guard(async()=>{S.clip.banner_start=S.clip.banner_end=null;await save({banner_start:null,banner_end:null});drawTrim();drawBanner()});
+
+  // Exit Studio
+  $('#closeStudio').onclick=()=>{S.cid=null;S.clip=null;showEditor(false);drawCands();drawMap()};
+  $('#play').onclick=playClip;
+  $('#stepBack').onclick=()=>{
+    const isCut = (v.duration && v.duration <= (c.end - c.start) + 2.5);
+    const minT = isCut ? 0 : c.start;
+    v.currentTime = Math.max(minT, v.currentTime - 0.5);
+    drawPh();updateTimeCode();
+  };
+  $('#stepFwd').onclick=()=>{
+    const isCut = (v.duration && v.duration <= (c.end - c.start) + 2.5);
+    const maxT = isCut ? (c.end - c.start) : c.end;
+    v.currentTime = Math.min(maxT, v.currentTime + 0.5);
+    drawPh();updateTimeCode();
+  };
+  $('#snd').onchange=e=>v.muted=!e.target.checked;
   $('#approve').onclick=guard(()=>approve(S.cid));
-  $('#reject').onclick=guard(()=>save({status:'rejected'}).then(()=>toast('Rejected.')));
+  $('#reject').onclick=guard(()=>save({status:'rejected'}).then(()=>{toast('Rejected.');showEditor(false)}));
   $('#title').onchange=guard(e=>save({title:e.target.value}));
-  $('#lang').onchange=guard(e=>save({lang:e.target.value}));
-  $('#vo').onchange=guard(e=>save({vo:e.target.value}));
-  $('#voTitle').onclick=guard(async()=>{$('#vo').value=S.clip.title;await save({vo:S.clip.title})});
-  $('#views').onchange=guard(e=>save({views:e.target.value}));
-  $('#st').onchange=guard(()=>setTimes(+$('#st').value,+$('#en').value));$('#en').onchange=guard(()=>setTimes(+$('#st').value,+$('#en').value));
-  $('#stNow').onclick=guard(()=>setTimes(v.currentTime,S.clip.end));$('#enNow').onclick=guard(()=>setTimes(S.clip.start,v.currentTime));
-  el.querySelectorAll('[data-n]').forEach(b=>b.onclick=guard(()=>{const [k,d]=b.dataset.n.split(':');k==='st'?setTimes(S.clip.start+ +d,S.clip.end):setTimes(S.clip.start,S.clip.end+ +d)}));
-  $('#layout').onclick=guard(async e=>{const b=e.target.closest('[data-l]');if(!b)return;await save({layout:b.dataset.l});$('#cx').hidden=!['crop','stack','pip'].includes(S.clip.layout);markSeg();loadFraming()});
-  $('#camEdit').onclick=camEditor;
+
+  // Ask AI & Post text handlers
+  const ask=guard(async()=>{
+    const t=$('#ask')?.value?.trim();if(!t)return;
+    const r=await send('POST','/api/clips/'+S.cid+'/ask',{text:t});
+    toast('Changed: '+Object.keys(r.changed).join(', ')+'.');
+    await loadClips();
+    await selectClip(S.cid);
+  });
+  if($('#askGo')) $('#askGo').onclick=ask;
+  if($('#ask')) $('#ask').onkeydown=e=>{if(e.key==='Enter')ask()};
+  if($('#post')){
+    api('/api/clips/'+c.id+'/post').then(r=>{if(S.cid===c.id&&$('#post'))$('#post').value=r.text}).catch(()=>{});
+  }
+  if($('#postCopy')) $('#postCopy').onclick=guard(async()=>{const t=$('#post');try{await navigator.clipboard.writeText(t.value)}catch{t.select();document.execCommand('copy')}toast('Post text copied.')});
+  if($('#cover')) $('#cover').onclick=()=>{const a=document.createElement('a');a.href='/api/clips/'+S.cid+'/cover';a.download='';document.body.appendChild(a);a.click();a.remove()};
+
+  // Keyboard shortcut Spacebar to play/pause in studio
+  window.onkeydown=e=>{
+    if(e.code==='Space'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){
+      e.preventDefault();playClip();
+    }
+  };
+
+  // Studio Drawer Tabs
+  $('#studioTabs').onclick=e=>{
+    const b=e.target.closest('.s-tab');if(!b)return;
+    const tab=b.dataset.tab;
+    $('#studioTabs').querySelectorAll('.s-tab').forEach(t=>t.classList.toggle('on',t===b));
+    el.querySelectorAll('.studio-panel').forEach(p=>p.classList.toggle('on',p.id==='spanel-'+tab));
+  };
+
+  // Quick Corner Snaps for Camera & Streamer Location
+  $('#snapGrid').onclick=guard(async e=>{
+    const b=e.target.closest('[data-snap]');if(!b)return;
+    const s=b.dataset.snap;
+    const v=$('#pv');
+    const vw=v?.videoWidth || (S.video && S.video.w) || 1280;
+    const vh=v?.videoHeight || (S.video && S.video.h) || 720;
+    
+    let box;
+    if(s==='tl') box=[0, 0, Math.round(vw*0.35), Math.round(vh*0.50)];
+    else if(s==='tr') box=[Math.round(vw*0.65), 0, Math.round(vw*0.35), Math.round(vh*0.50)];
+    else if(s==='bl') box=[0, Math.round(vh*0.45), Math.round(vw*0.35), Math.round(vh*0.55)];
+    else if(s==='br') box=[Math.round(vw*0.65), Math.round(vh*0.45), Math.round(vw*0.35), Math.round(vh*0.55)];
+    else if(s==='tc') box=[Math.round(vw*0.325), 0, Math.round(vw*0.35), Math.round(vh*0.50)];
+    else if(s==='bc') box=[Math.round(vw*0.325), Math.round(vh*0.45), Math.round(vw*0.35), Math.round(vh*0.55)];
+    else box=[Math.round(vw*0.65), 0, Math.round(vw*0.35), Math.round(vh*0.50)];
+    
+    $('#snapGrid').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+    if(S.video) S.video.cam_box = JSON.stringify(box);
+    S.clip.cam_corner = s;
+    S.clip.cam = null;
+    if(!S.framing) S.framing = { w: vw, h: vh };
+    S.framing.box = box;
+    S.framing.cam = box;
+    applyLayout();
+    
+    const vid = S.vid || (S.clip && S.clip.video_id);
+    await send('PATCH', '/api/videos/'+vid, {cam_box: box});
+    await save({cam_corner: s, cam_crop_x: 0.5, cam_crop_y: 0.5});
+    S.framing = null;
+    await loadFraming();
+    applyLayout();
+    toast('Streamer set to '+b.textContent.trim());
+  });
+
+  // Dual-Cam Split Ratio
+  const splitInp=$('#splitRatio'), splitVal=$('#splitVal');
+  if(splitInp){
+    splitInp.oninput=e=>{
+      const val=+e.target.value;
+      S.clip.split_ratio=val;
+      if(splitVal) splitVal.textContent = Math.round(val*100)+'% Top / '+Math.round((1-val)*100)+'% Bottom';
+      applyLayout();
+    };
+    splitInp.onchange=guard(e=>save({split_ratio:+e.target.value}));
+  }
+  if($('#splitPresets')){
+    $('#splitPresets').onclick=guard(async e=>{
+      const b=e.target.closest('[data-split]');if(!b)return;
+      const val=+b.dataset.split;
+      S.clip.split_ratio=val;
+      if(splitInp) splitInp.value=val;
+      if(splitVal) splitVal.textContent = Math.round(val*100)+'% Top / '+Math.round((1-val)*100)+'% Bottom';
+      $('#splitPresets').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+      await save({split_ratio:val});
+      applyLayout();
+    });
+  }
+
+  // Swap Dual-Cam Screen Positions (Top vs Bottom)
+  if($('#swapDualScreens')){
+    $('#swapDualScreens').onclick=guard(async()=>{
+      const _isBottom = ['bottom','bl','br','bc'].includes(S.clip.cam_pos);
+      const newPos = _isBottom ? 'top' : 'bottom';
+      S.clip.cam_pos = newPos;
+      $('#swapDualScreens').textContent = '🔄 Swap: ' + (newPos==='bottom'?'Gameplay Top / Streamer Bottom':'Streamer Top / Gameplay Bottom');
+      await save({cam_pos: newPos});
+      applyLayout();
+      toast('Swapped screens: ' + (newPos==='bottom'?'Streamer on Bottom':'Streamer on Top'));
+    });
+  }
+
+  // Camera Shape (Rect / Circle)
+  $('#camShape').onclick=guard(async e=>{
+    const b=e.target.closest('[data-shape]');if(!b)return;
+    await save({cam_shape:b.dataset.shape});
+    markSeg();applyLayout();
+  });
+
+  // Streamer Cam Zoom Controls
+  const zoomInp=$('#camZoom'), zoomVal=$('#zoomVal');
+  const updateCamZoom = async val => {
+    val = Math.round(Math.max(0.4, Math.min(3.0, val)) * 100) / 100;
+    S.clip.cam_zoom = val;
+    if(zoomInp) zoomInp.value = val;
+    if(zoomVal) zoomVal.textContent = Math.round(val * 100) + '%';
+    applyLayout();
+    await save({cam_zoom: val});
+  };
+  if(zoomInp){
+    zoomInp.oninput=e=>{
+      S.clip.cam_zoom = +e.target.value;
+      if(zoomVal) zoomVal.textContent = Math.round(S.clip.cam_zoom * 100) + '%';
+      applyLayout();
+    };
+    zoomInp.onchange=guard(e=>updateCamZoom(+e.target.value));
+  }
+  if($('#camZoomIn')) $('#camZoomIn').onclick=guard(()=>updateCamZoom((S.clip.cam_zoom||1.0)+0.1));
+  if($('#camZoomOut')) $('#camZoomOut').onclick=guard(()=>updateCamZoom((S.clip.cam_zoom||1.0)-0.1));
+  if($('#camZoomReset')) $('#camZoomReset').onclick=guard(()=>updateCamZoom(1.0));
+
+  // Streamer Pan Controls
+  const panXInp=$('#camPanX'), panYInp=$('#camPanY');
+  if(panXInp){
+    panXInp.oninput=e=>{ S.clip.cam_crop_x = +e.target.value; applyLayout(); };
+    panXInp.onchange=guard(e=>save({cam_crop_x: +e.target.value}));
+  }
+  if(panYInp){
+    panYInp.oninput=e=>{ S.clip.cam_crop_y = +e.target.value; applyLayout(); };
+    panYInp.onchange=guard(e=>save({cam_crop_y: +e.target.value}));
+  }
+
+  // Gameplay Screen Zoom Controls
+  const gameZoomInp=$('#gameZoom'), gameZoomVal=$('#gameZoomVal');
+  const updateGameZoom = async val => {
+    val = Math.round(Math.max(0.4, Math.min(3.0, val)) * 100) / 100;
+    S.clip.game_zoom = val;
+    if(gameZoomInp) gameZoomInp.value = val;
+    if(gameZoomVal) gameZoomVal.textContent = Math.round(val * 100) + '%';
+    applyLayout();
+    await save({game_zoom: val});
+  };
+  if(gameZoomInp){
+    gameZoomInp.oninput=e=>{
+      S.clip.game_zoom = +e.target.value;
+      if(gameZoomVal) gameZoomVal.textContent = Math.round(S.clip.game_zoom * 100) + '%';
+      applyLayout();
+    };
+    gameZoomInp.onchange=guard(e=>updateGameZoom(+e.target.value));
+  }
+  if($('#gameZoomIn')) $('#gameZoomIn').onclick=guard(()=>updateGameZoom((S.clip.game_zoom||1.0)+0.1));
+  if($('#gameZoomOut')) $('#gameZoomOut').onclick=guard(()=>updateGameZoom((S.clip.game_zoom||1.0)-0.1));
+  if($('#gameZoomReset')) $('#gameZoomReset').onclick=guard(()=>updateGameZoom(1.0));
+
+  // Gameplay Pan Controls
+  if($('#cx')){
+    $('#cx').oninput=e=>{ S.clip.crop_x=+e.target.value; applyLayout(); };
+    $('#cx').onchange=guard(e=>save({crop_x:+e.target.value}));
+  }
+  if($('#cy')){
+    $('#cy').oninput=e=>{ S.clip.crop_y=+e.target.value; applyLayout(); };
+    $('#cy').onchange=guard(e=>save({crop_y:+e.target.value}));
+  }
+
+  // Hook Text
+  $('#bannerText').oninput=e=>{
+    S.clip.banner_text=e.target.value;
+    drawBanner();
+  };
+  $('#bannerText').onchange=guard(e=>save({banner_text:e.target.value}));
+  $('#presetChips').onclick=guard(async e=>{
+    const b=e.target.closest('button');if(!b)return;
+    const txt=b.dataset.txt;
+    $('#bannerText').value=txt;
+    S.clip.banner_text=txt;
+    drawBanner();
+    await save({banner_text:txt});
+  });
+  if($('#bannerPosChips')){
+    $('#bannerPosChips').onclick=guard(async e=>{
+      const b=e.target.closest('[data-pos]');if(!b)return;
+      const pos=b.dataset.pos;
+      if(pos==='top'){ S.clip.banner_x=0.5; S.clip.banner_y=0.12; }
+      else if(pos==='middle'){ S.clip.banner_x=0.5; S.clip.banner_y=0.50; }
+      else if(pos==='bottom'){ S.clip.banner_x=0.5; S.clip.banner_y=0.85; }
+      drawBanner();
+      await save({banner_x: S.clip.banner_x, banner_y: S.clip.banner_y});
+      toast('Title card moved to '+pos+' position.');
+    });
+  }
+  $('#bannerStyle').onclick=guard(async e=>{
+    const b=e.target.closest('[data-bs]');if(!b)return;
+    $('#bannerStyle').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+    await save({banner_style:b.dataset.bs});
+    markSeg();drawBanner();
+  });
+
+  // Banner Font & Size
+  const bszInp=$('#bannerSize'), bszVal=$('#bannerSizeVal');
+  const updateBannerSize = async val => {
+    val = Math.round(Math.max(0.5, Math.min(2.5, val)) * 100) / 100;
+    S.clip.banner_size = val;
+    if(bszInp) bszInp.value = val;
+    if(bszVal) bszVal.textContent = Math.round(val * 100) + '%';
+    drawBanner();
+    await save({banner_size: val});
+  };
+  if(bszInp){
+    bszInp.oninput=e=>{
+      S.clip.banner_size = +e.target.value;
+      if(bszVal) bszVal.textContent = Math.round(S.clip.banner_size * 100) + '%';
+      drawBanner();
+    };
+    bszInp.onchange=guard(e=>updateBannerSize(+e.target.value));
+  }
+  if($('#bannerSizeDown')) $('#bannerSizeDown').onclick=guard(()=>updateBannerSize((S.clip.banner_size||1.0)-0.1));
+  if($('#bannerSizeUp')) $('#bannerSizeUp').onclick=guard(()=>updateBannerSize((S.clip.banner_size||1.0)+0.1));
+  if($('#bannerSizeReset')) $('#bannerSizeReset').onclick=guard(()=>updateBannerSize(1.0));
+  if($('#bannerFont')){
+    $('#bannerFont').onclick=guard(async e=>{
+      const b=e.target.closest('[data-bf]');if(!b)return;
+      const bf=b.dataset.bf;
+      $('#bannerFont').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+      S.clip.banner_font=bf;
+      drawBanner();
+      await save({banner_font: bf});
+      toast('Font changed to '+bf);
+    });
+  }
+
+  // Subtitle Font & Size
+  const cszInp=$('#capSize'), cszVal=$('#capSizeVal');
+  const updateCaptionSize = async val => {
+    val = Math.round(Math.max(0.4, Math.min(3.0, val)) * 100) / 100;
+    S.clip.caption_size = val;
+    if(cszInp) cszInp.value = val;
+    if(cszVal) cszVal.textContent = Math.round(val * 100) + '%';
+    drawCaption();
+    await save({caption_size: val});
+  };
+  if(cszInp){
+    cszInp.oninput=e=>{
+      S.clip.caption_size = +e.target.value;
+      if(cszVal) cszVal.textContent = Math.round(S.clip.caption_size * 100) + '%';
+      drawCaption();
+    };
+    cszInp.onchange=guard(e=>updateCaptionSize(+e.target.value));
+  }
+  if($('#capSizeDown')) $('#capSizeDown').onclick=guard(()=>updateCaptionSize((S.clip.caption_size||1.0)-0.1));
+  if($('#capSizeUp')) $('#capSizeUp').onclick=guard(()=>updateCaptionSize((S.clip.caption_size||1.0)+0.1));
+  if($('#capSizeReset')) $('#capSizeReset').onclick=guard(()=>updateCaptionSize(1.0));
+  if($('#capFont')){
+    $('#capFont').onclick=guard(async e=>{
+      const b=e.target.closest('[data-cf]');if(!b)return;
+      const cf=b.dataset.cf;
+      $('#capFont').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+      S.clip.caption_font=cf;
+      drawCaption();
+      await save({caption_font: cf});
+      toast('Subtitle font changed to '+cf);
+    });
+  }
+
+  // Translation, Voice-over & Views
+  if($('#lang')) $('#lang').onchange=guard(e=>save({lang:e.target.value}));
+  if($('#vo')) $('#vo').onchange=guard(e=>save({vo:e.target.value}));
+  if($('#voTitle')) $('#voTitle').onclick=guard(async()=>{$('#vo').value=S.clip.title;await save({vo:S.clip.title});toast('Title copied to voice-over.')});
+  if($('#views')) $('#views').onchange=guard(e=>save({views:e.target.value}));
+
+  // Subtitle Download
+  if($('#dlSrtBtn')){
+    $('#dlSrtBtn').onclick=guard(async ()=>{
+      const a=document.createElement('a');
+      a.href='/api/clips/'+S.cid+'/subtitles';
+      a.download='';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast('Subtitles (.SRT) downloaded!');
+    });
+  }
+
+  // Timeline Navigation & Lengthen / Cut Controls
+  if($('#tlViewClip')) $('#tlViewClip').onclick=()=>{
+    T.view='clip';
+    $('#tlViewClip').classList.add('on');
+    if($('#tlViewFull')) $('#tlViewFull').classList.remove('on');
+    drawTrim();
+  };
+  if($('#tlViewFull')) $('#tlViewFull').onclick=()=>{
+    T.view='full';
+    $('#tlViewFull').classList.add('on');
+    if($('#tlViewClip')) $('#tlViewClip').classList.remove('on');
+    drawTrim();
+  };
+  if($('#trimStartMinus')) $('#trimStartMinus').onclick=guard(async ()=>{
+    const ns=Math.max(0, S.clip.start - 1.0);
+    await setTimes(+ns.toFixed(2), +S.clip.end.toFixed(2));
+    toast('Clip start trimmed 1s earlier.');
+  });
+  if($('#trimEndPlus')) $('#trimEndPlus').onclick=guard(async ()=>{
+    const dur=(S.video&&S.video.duration)||86400;
+    const ne=Math.min(dur, S.clip.end + 1.0);
+    await setTimes(+S.clip.start.toFixed(2), +ne.toFixed(2));
+    toast('Clip end trimmed 1s longer.');
+  });
+  if($('#extStartMinus')) $('#extStartMinus').onclick=guard(async ()=>{
+    const ns=Math.max(0, S.clip.start - 5.0);
+    await setTimes(+ns.toFixed(2), +S.clip.end.toFixed(2));
+    toast('Clip extended 5s earlier.');
+  });
+  if($('#extEndPlus')) $('#extEndPlus').onclick=guard(async ()=>{
+    const dur=(S.video&&S.video.duration)||86400;
+    const ne=Math.min(dur, S.clip.end + 5.0);
+    await setTimes(+S.clip.start.toFixed(2), +ne.toFixed(2));
+    toast('Clip extended 5s longer.');
+  });
+  if($('#cutSplitBtn')) $('#cutSplitBtn').onclick=guard(async ()=>{
+    const cur = v.currentTime;
+    if(cur > S.clip.start + 0.5 && cur < S.clip.end - 0.5){
+      await setTimes(+S.clip.start.toFixed(2), +cur.toFixed(2));
+      toast('Cut clip at playhead (' + cur.toFixed(1) + 's)');
+    } else {
+      toast('Move playhead inside the clip to cut.');
+    }
+  });
+  if($('#stNow')) $('#stNow').onclick=guard(async ()=>{
+    const cur = v.currentTime;
+    if(cur < S.clip.end - 0.5){
+      await setTimes(+cur.toFixed(2), +S.clip.end.toFixed(2));
+      toast('In-point set to ' + cur.toFixed(1) + 's');
+    }
+  });
+  if($('#enNow')) $('#enNow').onclick=guard(async ()=>{
+    const cur = v.currentTime;
+    if(cur > S.clip.start + 0.5){
+      await setTimes(+S.clip.start.toFixed(2), +cur.toFixed(2));
+      toast('Out-point set to ' + cur.toFixed(1) + 's');
+    }
+  });
+  if($('#inStartSec')){
+    $('#inStartSec').onchange=guard(async e=>{
+      let ns=parseFloat(e.target.value);
+      if(isNaN(ns)) return;
+      ns=Math.max(0, Math.min(S.clip.end - 1.0, ns));
+      await setTimes(+ns.toFixed(2), +S.clip.end.toFixed(2));
+    });
+  }
+  if($('#inEndSec')){
+    $('#inEndSec').onchange=guard(async e=>{
+      let ne=parseFloat(e.target.value);
+      if(isNaN(ne)) return;
+      const dur=(S.video&&S.video.duration)||86400;
+      ne=Math.min(dur, Math.max(S.clip.start + 1.0, ne));
+      await setTimes(+S.clip.start.toFixed(2), +ne.toFixed(2));
+    });
+  }
+  if($('#inLenSec')){
+    $('#inLenSec').onchange=guard(async e=>{
+      let nlen=parseFloat(e.target.value);
+      if(isNaN(nlen)||nlen<1.0) return;
+      const dur=(S.video&&S.video.duration)||86400;
+      const ne=Math.min(dur, S.clip.start + nlen);
+      await setTimes(+S.clip.start.toFixed(2), +ne.toFixed(2));
+      toast('Length adjusted to ' + (ne - S.clip.start).toFixed(1) + 's');
+    });
+  }
+  if($('#lenMinus5')) $('#lenMinus5').onclick=guard(async ()=>{
+    const curLen = S.clip.end - S.clip.start;
+    const nlen = Math.max(2.0, curLen - 5.0);
+    await setTimes(+S.clip.start.toFixed(2), +(S.clip.start + nlen).toFixed(2));
+    toast('Length shortened to ' + nlen.toFixed(1) + 's');
+  });
+  if($('#lenPlus5')) $('#lenPlus5').onclick=guard(async ()=>{
+    const dur=(S.video&&S.video.duration)||86400;
+    const curLen = S.clip.end - S.clip.start;
+    const ne = Math.min(dur, S.clip.start + curLen + 5.0);
+    await setTimes(+S.clip.start.toFixed(2), +ne.toFixed(2));
+    toast('Length extended to ' + (ne - S.clip.start).toFixed(1) + 's');
+  });
+
+  // Layout Engine
+  $('#layout').onclick=guard(async e=>{
+    const b=e.target.closest('[data-l]');if(!b)return;
+    const l=b.dataset.l;
+    S.clip.layout=l;
+    $('#layout').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+    const ld=$('#layoutDesc');
+    if(ld){
+      ld.innerHTML=l==='pip'?'<b>Floating Cam:</b> Streamer camera freely floats over the gameplay anywhere you drag it.':(l==='stack'?'<b>Dual-Cam layout:</b> Splits into 2 screens stacked vertically. Top captures streamer reaction, bottom captures gameplay.':'<b>Standard framing:</b> Single focused screen.');
+    }
+    const splitBox=$('#dualSplitBox');
+    if(splitBox) splitBox.hidden = l !== 'stack';
+    await save({layout:l});
+    S.framing = null;
+    await loadFraming();
+    applyLayout();
+  });
+  if($('#camEdit'))$('#camEdit').onclick=camEditor;
+
+  // Aspect Ratio & Resolution
+  $('#aspectRatio').onclick=guard(async e=>{
+    const b=e.target.closest('[data-aspect]');if(!b)return;
+    const asp=b.dataset.aspect, ph=$('#phone');
+    $('#aspectRatio').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+    S.clip.aspect_ratio=asp;
+    if(ph) ph.style.aspectRatio=(asp==='1:1')?'1/1':(asp==='16:9')?'16/9':'9/16';
+    await save({aspect_ratio: asp});
+    applyLayout();
+    toast(`Aspect ratio set to ${asp}.`);
+  });
   $('#res').onclick=guard(async e=>{const b=e.target.closest('[data-r]');if(!b)return;await save({res:+b.dataset.r});markSeg()});
   $('#cx').oninput=e=>{S.clip.crop_x=+e.target.value;applyLayout()};$('#cx').onchange=guard(e=>save({crop_x:+e.target.value}));
+
+  // Caption options
   $('#tpls').onclick=guard(async e=>{const b=e.target.closest('[data-t]');if(!b)return;await save({template:b.dataset.t});el.querySelectorAll('#tpls .style').forEach(x=>x.classList.toggle('on',x===b));drawCaption()});
   $('#capon').onchange=guard(e=>save({captions:e.target.checked?1:0}).then(drawCaption));
+  $('#hookzoom').onchange=guard(e=>save({hook_zoom:e.target.checked?1:0}));
+  $('#censor').onchange=guard(e=>save({censor:e.target.checked?1:0}));
+
+  // Audio & SFX
   $('#music').onchange=guard(e=>save({music:e.target.value}));
-  $('#sfxAuto').onclick=guard(async()=>{const c=await send('POST','/api/clips/'+S.cid+'/sfx/auto');Object.assign(S.clip,c);drawSfx();await loadClips();updateApproveUI();
-    toast(c.sfx.length?`Added ${c.sfx.length} effects.`:'No effects found in the library.')});
-  $('#sfxAdd').onclick=guard(()=>saveSfx([...S.clip.sfx,{f:$('#sfxPick').value,t:+$('#pv').currentTime.toFixed(2),v:.7}]));
-  $('#sfxList').onchange=guard(e=>{const i=+e.target.closest('[data-i]').dataset.i,l=S.clip.sfx.map(x=>({...x}));
-    if(e.target.dataset.k==='f')l[i].f=e.target.value;else if(e.target.dataset.k==='t')l[i].t=S.clip.start+(+e.target.value);else l[i].v=+e.target.value;return saveSfx(l)});
-  $('#sfxList').onclick=guard(e=>{const b=e.target.closest('button');if(!b)return;const i=+b.closest('[data-i]').dataset.i,x=S.clip.sfx[i];
-    if(b.dataset.a==='del')return saveSfx(S.clip.sfx.filter((_,j)=>j!==i));
-    if(b.dataset.a==='play')playSfx(x);if(b.dataset.a==='go'){$('#pv').currentTime=x.t;drawPh()}});
-  drawSfx();$('#sfx1').onchange=guard(e=>save({sfx_intro:e.target.value}));
+  $('#sfx1').onchange=guard(e=>save({sfx_intro:e.target.value}));
+  $('#sfx2').onchange=guard(e=>save({sfx_peak:e.target.value}));
+  $('#sfxAuto').onclick=guard(async()=>{
+    const c=await send('POST','/api/clips/'+S.cid+'/sfx/auto');
+    Object.assign(S.clip,c);drawSfx();drawTrim();toast(`Auto-added ${c.sfx.length} effects to the timeline.`);
+  });
+  const addSfxHere=()=>saveSfx([...S.clip.sfx,{f:$('#sfxPick').value,t:+$('#pv').currentTime.toFixed(2),v:.7}]);
+  $('#sfxAdd').onclick=guard(addSfxHere);
+  $('#sfxAddPlayhead').onclick=guard(addSfxHere);
+
+  $('#stNow').onclick=guard(()=>setTimes(v.currentTime,S.clip.end));
+  $('#enNow').onclick=guard(()=>setTimes(S.clip.start,v.currentTime));
 }
-function markSeg(){$('#layout').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.l===S.clip.layout));$('#res').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.r===S.clip.res))}
-function updDur(){const c=S.clip;$('#dur').textContent=`Clip length ${(c.end-c.start).toFixed(1)}s.`+(c.stream_offset?` In the stream it starts at ${fmtLong(c.start+c.stream_offset)}; start and end here count inside the saved excerpt.`:' Captions exist only where speech was heard, about 5 seconds either side of the picked moment.')}
-async function saveSfx(list){await save({sfx:list});drawSfx()}
+
+function updateTimeCode(){
+  const v=$('#pv'), tc=$('#timeCode'), c=S.clip;
+  if(!v||!tc||!c)return;
+  tc.textContent=`${fmtLong(v.currentTime)} / ${fmtLong(c.end)}`;
+}
+
+/* ---------------- Interactive Monitor Direct Canvas Drag ---------------- */
+function initCanvasDrag(){
+  const cv=$('#stackcv');
+  if(!cv)return;
+
+  cv.onpointerdown=e=>{
+    if(!S.clip) return;
+    const r=cv.getBoundingClientRect();
+    const mx=(e.clientX-r.left)*(cv.width/r.width), my=(e.clientY-r.top)*(cv.height/r.height);
+    const c=S.clip, W=cv.width, H=cv.height;
+
+    if(c.layout === 'stack'){
+      const topShare = Math.max(0.25, Math.min(0.75, c.split_ratio || 0.5));
+      const th = Math.round(H * topShare);
+      cv.setPointerCapture(e.pointerId);
+
+      if(Math.abs(my - th) <= 14){
+        // Dragging the split divider line
+        S.canvasDrag = {
+          mode: 'split',
+          startY: my,
+          initialRatio: topShare,
+          moved: false
+        };
+        cv.style.cursor = 'row-resize';
+      } else {
+        const _btmCorners = new Set(['bottom','bl','br','bc']);
+        const isStreamerClick = !_btmCorners.has(c.cam_pos) ? (my < th) : (my > th);
+        if(isStreamerClick){
+          // Dragging inside streamer screen (pan streamer)
+          S.canvasDrag = {
+            mode: 'cam_pan',
+            startX: mx,
+            startY: my,
+            initialX: typeof c.cam_crop_x === 'number' ? c.cam_crop_x : 0.5,
+            initialY: typeof c.cam_crop_y === 'number' ? c.cam_crop_y : 0.5,
+            moved: false
+          };
+          cv.style.cursor = 'grabbing';
+        } else {
+          // Dragging inside gameplay screen (pan gameplay)
+          S.canvasDrag = {
+            mode: 'game_pan',
+            startX: mx,
+            startY: my,
+            initialX: typeof c.crop_x === 'number' ? c.crop_x : 0.5,
+            initialY: typeof c.crop_y === 'number' ? c.crop_y : 0.5,
+            moved: false
+          };
+          cv.style.cursor = 'move';
+        }
+      }
+      e.preventDefault();
+      return;
+    }
+
+    if(c.layout === 'pip' && S.camBox){
+      const b=S.camBox;
+      let inside = false;
+      if(b.shape==='circle'){
+        inside = Math.hypot(mx-(b.x+b.w/2), my-(b.y+b.h/2)) <= Math.min(b.w,b.h)/2+10;
+      }else{
+        inside = mx>=b.x-6 && mx<=b.x+b.w+6 && my>=b.y-6 && my<=b.y+b.h+6;
+      }
+      cv.setPointerCapture(e.pointerId);
+      if(inside){
+        S.canvasDrag = {
+          mode: 'pip_cam',
+          dx: mx - b.x,
+          dy: my - b.y,
+          moved: false
+        };
+        cv.style.cursor = 'grabbing';
+      } else {
+        S.canvasDrag = {
+          mode: 'game_pan',
+          startX: mx,
+          startY: my,
+          initialX: typeof c.crop_x === 'number' ? c.crop_x : 0.5,
+          initialY: typeof c.crop_y === 'number' ? c.crop_y : 0.5,
+          moved: false
+        };
+        cv.style.cursor = 'move';
+      }
+      e.preventDefault();
+      return;
+    }
+
+    // Default: pan gameplay in single-screen modes
+    cv.setPointerCapture(e.pointerId);
+    S.canvasDrag = {
+      mode: 'game_pan',
+      startX: mx,
+      startY: my,
+      initialX: typeof c.crop_x === 'number' ? c.crop_x : 0.5,
+      initialY: typeof c.crop_y === 'number' ? c.crop_y : 0.5,
+      moved: false
+    };
+    cv.style.cursor = 'move';
+    e.preventDefault();
+  };
+
+  cv.onpointermove=e=>{
+    const r=cv.getBoundingClientRect();
+    const mx=(e.clientX-r.left)*(cv.width/r.width), my=(e.clientY-r.top)*(cv.height/r.height);
+    const c=S.clip, W=cv.width, H=cv.height;
+    if(!c) return;
+
+    if(S.canvasDrag){
+      const d=S.canvasDrag;
+      d.moved = true;
+
+      if(d.mode === 'split'){
+        const newRatio = Math.max(0.25, Math.min(0.75, my / H));
+        c.split_ratio = Math.round(newRatio * 100) / 100;
+        const sInp = $('#splitRatio'), sVal = $('#splitVal');
+        if(sInp) sInp.value = c.split_ratio;
+        if(sVal) sVal.textContent = Math.round(c.split_ratio*100)+'% Top / '+Math.round((1-c.split_ratio)*100)+'% Bottom';
+        applyLayout();
+        return;
+      }
+
+      if(d.mode === 'cam_pan'){
+        const dx = (mx - d.startX) / W;
+        const dy = (my - d.startY) / (H * (c.split_ratio || 0.5));
+        c.cam_crop_x = Math.max(0, Math.min(1, d.initialX - dx * 0.8));
+        c.cam_crop_y = Math.max(0, Math.min(1, d.initialY - dy * 0.8));
+        applyLayout();
+        return;
+      }
+
+      if(d.mode === 'game_pan'){
+        const dx = (mx - d.startX) / W;
+        const dy = (my - d.startY) / H;
+        c.crop_x = Math.max(0, Math.min(1, d.initialX - dx * 0.7));
+        c.crop_y = Math.max(0, Math.min(1, (d.initialY ?? 0.5) - dy * 0.7));
+        const cxInp = $('#cx'), cyInp = $('#cy');
+        if(cxInp) cxInp.value = c.crop_x;
+        if(cyInp) cyInp.value = c.crop_y;
+        applyLayout();
+        return;
+      }
+
+      if(d.mode === 'pip_cam' && S.camBox){
+        const pw=S.camBox.w, ph=S.camBox.h;
+        const nx=Math.max(0, Math.min(W-pw, mx-d.dx));
+        const ny=Math.max(0, Math.min(H-ph, my-d.dy));
+        c.cam_pos_x = W-pw > 0 ? nx/(W-pw) : 0.5;
+        c.cam_pos_y = H-ph > 0 ? ny/(H-ph) : 0.65;
+        c.cam_pos = 'pip_custom';
+        applyLayout();
+        return;
+      }
+    }
+
+    // Hover cursor feedback
+    if(c.layout === 'stack'){
+      const th = Math.round(H * (c.split_ratio || 0.5));
+      if(Math.abs(my - th) <= 14){
+        cv.style.cursor = 'row-resize';
+      } else {
+        const _btmHoverCorners = new Set(['bottom','bl','br','bc']);
+        const isStreamerHover = !_btmHoverCorners.has(c.cam_pos) ? (my < th) : (my > th);
+        cv.style.cursor = isStreamerHover ? 'grab' : 'move';
+      }
+      return;
+    }
+
+    if(c.layout === 'pip' && S.camBox){
+      const b=S.camBox;
+      let inside = false;
+      if(b.shape==='circle'){
+        inside = Math.hypot(mx-(b.x+b.w/2), my-(b.y+b.h/2)) <= Math.min(b.w,b.h)/2+10;
+      }else{
+        inside = mx>=b.x-6 && mx<=b.x+b.w+6 && my>=b.y-6 && my<=b.y+b.h+6;
+      }
+      cv.style.cursor = inside ? 'grab' : 'move';
+      return;
+    }
+
+    cv.style.cursor = 'move';
+  };
+
+  cv.onpointerup=cv.onpointercancel=async e=>{
+    if(!S.canvasDrag) return;
+    const d=S.canvasDrag;
+    S.canvasDrag = null;
+
+    if(d.moved){
+      if(d.mode === 'split'){
+        await save({ split_ratio: S.clip.split_ratio });
+        toast('Split ratio saved.');
+      } else if(d.mode === 'cam_pan'){
+        await save({ cam_crop_x: S.clip.cam_crop_x, cam_crop_y: S.clip.cam_crop_y });
+        toast('Streamer framing adjusted.');
+      } else if(d.mode === 'game_pan'){
+        await save({ crop_x: S.clip.crop_x, crop_y: S.clip.crop_y });
+        toast('Gameplay framing adjusted.');
+      } else if(d.mode === 'pip_cam'){
+        await save({
+          cam_pos_x: S.clip.cam_pos_x,
+          cam_pos_y: S.clip.cam_pos_y,
+          cam_pos: 'pip_custom',
+          layout: 'pip'
+        });
+        toast('Streamer camera placed.');
+      }
+    }
+  };
+
+  // Wheel Zoom on Canvas directly
+  cv.onwheel = guard(async e => {
+    if(!S.clip) return;
+    e.preventDefault();
+    const r = cv.getBoundingClientRect();
+    const my = (e.clientY - r.top) * (cv.height / r.height);
+    const c = S.clip, H = cv.height;
+    const delta = e.deltaY < 0 ? 0.08 : -0.08;
+    if(c.layout === 'stack'){
+      const th = Math.round(H * (c.split_ratio || 0.5));
+      const _btm = new Set(['bottom','bl','br','bc']);
+      const isStreamer = !_btm.has(c.cam_pos) ? (my < th) : (my > th);
+      if(isStreamer){
+        c.cam_zoom = Math.round(Math.max(0.4, Math.min(3.0, (c.cam_zoom || 1.0) + delta)) * 100) / 100;
+        const inp = $('#camZoom'), val = $('#zoomVal');
+        if(inp) inp.value = c.cam_zoom;
+        if(val) val.textContent = Math.round(c.cam_zoom * 100) + '%';
+        applyLayout();
+        await save({ cam_zoom: c.cam_zoom });
+      } else {
+        c.game_zoom = Math.round(Math.max(0.4, Math.min(3.0, (c.game_zoom || 1.0) + delta)) * 100) / 100;
+        const inp = $('#gameZoom'), val = $('#gameZoomVal');
+        if(inp) inp.value = c.game_zoom;
+        if(val) val.textContent = Math.round(c.game_zoom * 100) + '%';
+        applyLayout();
+        await save({ game_zoom: c.game_zoom });
+      }
+    } else {
+      c.game_zoom = Math.round(Math.max(0.4, Math.min(3.0, (c.game_zoom || 1.0) + delta)) * 100) / 100;
+      const inp = $('#gameZoom'), val = $('#gameZoomVal');
+      if(inp) inp.value = c.game_zoom;
+      if(val) val.textContent = Math.round(c.game_zoom * 100) + '%';
+      applyLayout();
+      await save({ game_zoom: c.game_zoom });
+    }
+  });
+}
+
+/* ---------------- PC Audio Upload Handling ---------------- */
+function initPcUpload(){
+  const drop=$('#pcAudioDrop'), fileInput=$('#pcAudioFile');
+  if(!drop||!fileInput)return;
+  let kind='sfx';
+  $('#importKind').onclick=e=>{
+    const b=e.target.closest('button');if(!b)return;
+    kind=b.dataset.k;
+    $('#importKind').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  };
+  drop.onclick=()=>fileInput.click();
+  drop.ondragover=e=>{e.preventDefault();drop.classList.add('dragover')};
+  drop.ondragleave=()=>drop.classList.remove('dragover');
+  drop.ondrop=e=>{
+    e.preventDefault();drop.classList.remove('dragover');
+    if(e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+  };
+  fileInput.onchange=()=>{if(fileInput.files.length) uploadFile(fileInput.files[0])};
+
+  async function uploadFile(f){
+    try{
+      const fd=new FormData();
+      fd.append('file',f);
+      toast('Uploading '+f.name+'...');
+      const res=await fetch('/api/audio/upload?kind='+kind,{method:'POST',body:fd});
+      const data=await res.json();
+      if(!res.ok) throw new Error(data.detail||'Upload failed');
+      S.audio=await api('/api/audio');
+      // Update dropdowns
+      if($('#music'))$('#music').innerHTML=optList(S.audio.music,S.clip.music,'None');
+      if($('#sfxPick'))$('#sfxPick').innerHTML=optList(S.audio.sfx,data.filename);
+      renderUploadedList(data.filename);
+      toast('Uploaded '+data.filename+' successfully!');
+    }catch(err){
+      toast('Error uploading: '+err.message,true);
+    }
+  }
+}
+
+function renderUploadedList(highlight){
+  const box=$('#pcUploadedList');if(!box)return;
+  const list=(S.audio.sfx||[]).slice(-6).reverse();
+  box.innerHTML=list.map(f=>`
+    <div class="uploaded-item">
+      <button onclick="playSfx({f:'${esc(f)}',v:1})" title="Preview sound" style="padding:2px 8px">▶</button>
+      <span class="fname">${esc(f)}</span>
+      <button class="primary" onclick="guard(()=>saveSfx([...S.clip.sfx,{f:'${esc(f)}',t:+$('#pv').currentTime.toFixed(2),v:.7}]))()" style="font-size:11px;padding:3px 8px">➕ Add</button>
+    </div>
+  `).join('');
+}
+
+/* ---------------- Multi-Track Studio Timeline ---------------- */
+function initTimelineTracks(){
+  const wrap=$('#tlCanvasWrap'), v=$('#pv');
+  if(!wrap||!v)return;
+
+  wrap.onpointerdown=e=>{
+    if(e.target.closest('[data-h]')||e.target.closest('.tl-sfx-chip')||e.target.closest('.tl-hook-strip')) return;
+    const r=wrap.getBoundingClientRect();
+    const pct=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
+    const t=T.lo+(T.hi-T.lo)*pct;
+    v.currentTime=t;
+    drawPh();
+    updateTimeCode();
+  };
+}
+
+// When the hook text shows, on the video timeline (like sound effects). Stored null = the whole clip.
+function bannerSpan(){
+  const c=S.clip;let s=c.banner_start??c.start,e=c.banner_end??c.end;
+  s=Math.max(c.start,Math.min(s,c.end));e=Math.min(c.end,Math.max(e,s));
+  return e-s<0.3?[c.start,c.end]:[s,e];
+}
+function initHookDrag(){
+  const strip=$('#tlHookStrip'),trk=$('#tlHookTrack');if(!strip||!trk)return;
+  strip.onpointerdown=e=>{
+    if(!S.clip)return;
+    e.preventDefault();e.stopPropagation();strip.setPointerCapture(e.pointerId);
+    const r=trk.getBoundingClientRect(),at=x=>T.lo+(T.hi-T.lo)*Math.min(1,Math.max(0,(x-r.left)/r.width));
+    const c=S.clip,h=e.target.dataset.bh,[s0,e0]=bannerSpan(),t0=at(e.clientX),v=$('#pv');
+    let s=s0,en=e0,moved=false;
+    strip.onpointermove=m=>{
+      moved=true;const t=at(m.clientX);
+      if(h==='s')s=Math.max(c.start,Math.min(t,en-0.5));
+      else if(h==='e')en=Math.min(c.end,Math.max(t,s+0.5));
+      else{const d=Math.max(c.start-s0,Math.min(c.end-e0,t-t0));s=s0+d;en=e0+d}
+      c.banner_start=+s.toFixed(2);c.banner_end=+en.toFixed(2);
+      if(v)v.currentTime=h==='e'?en:s;
+      drawTrim();drawBanner();
+    };
+    strip.onpointerup=strip.onpointercancel=guard(async()=>{
+      strip.onpointermove=strip.onpointerup=strip.onpointercancel=null;
+      if(moved){await save({banner_start:c.banner_start,banner_end:c.banner_end});drawTrim();drawBanner()}
+    });
+  };
+}
+function drawBanner(){
+  const box=$('#bannerBox'),c=S.clip,strip=$('#tlHookStrip'),txtNode=$('#tlHookText');
+  if(!box||!c)return;
+  const txt=(c.banner_text||'').trim();
+  const st=c.banner_style||'white_box';
+  if(!txt||st==='none'){
+    box.hidden=true;box.innerHTML='';
+    if(strip) strip.hidden=true;
+    return;
+  }
+  box.hidden=false;
+  const cls=st==='dark_box'?'card_dark':(st==='neon'?'card_neon':(st==='clean_text'?'card_clean':(st==='yellow_text'?'card_yellow':'card_white')));
+  const bx = typeof c.banner_x === 'number' ? c.banner_x : 0.5;
+  const by = typeof c.banner_y === 'number' ? c.banner_y : 0.12;
+  const bsz = typeof c.banner_size === 'number' ? c.banner_size : 1.0;
+  const bfont = c.banner_font || 'Impact, Arial, sans-serif';
+  const fpx = Math.round(14 * bsz);
+  box.style.left = (bx * 100).toFixed(1) + '%';
+  box.style.top = (by * 100).toFixed(1) + '%';
+  box.style.fontSize = fpx + 'px';
+  box.style.fontFamily = bfont;
+  box.innerHTML=`<div class="${cls}" style="font-size:${fpx}px!important;font-family:${bfont}!important"><span class="banner-drag-handle" title="Drag to move anywhere">⋮⋮</span><span>${esc(txt)}</span></div>`;
+  // only inside its time range; while paused outside it, a faint copy stays so you can still place and style it
+  const pv=$('#pv'),[bs,be]=bannerSpan(),now=pv?pv.currentTime:bs,inside=now>=bs-0.05&&now<=be+0.05;
+  box.style.opacity=inside?'':(pv&&!pv.paused?'0':'0.3');
+  if(strip&&txtNode){
+    strip.hidden=false;
+    txtNode.textContent='🏷️ '+txt;
+  }
+}
+
+function initBannerDrag(){
+  const box = $('#bannerBox'), phone = $('#phone');
+  if(!box || !phone) return;
+  box.onpointerdown = e => {
+    if(!S.clip) return;
+    e.preventDefault();
+    box.setPointerCapture(e.pointerId);
+    box.classList.add('dragging');
+    const pr = phone.getBoundingClientRect();
+    const bx = typeof S.clip.banner_x === 'number' ? S.clip.banner_x : 0.5;
+    const by = typeof S.clip.banner_y === 'number' ? S.clip.banner_y : 0.12;
+    const startClientX = e.clientX, startClientY = e.clientY;
+    let moved = false;
+
+    box.onpointermove = ev => {
+      ev.preventDefault();
+      moved = true;
+      const dx = (ev.clientX - startClientX) / pr.width;
+      const dy = (ev.clientY - startClientY) / pr.height;
+      const nx = Math.max(0.08, Math.min(0.92, bx + dx));
+      const ny = Math.max(0.06, Math.min(0.94, by + dy));
+      S.clip.banner_x = Math.round(nx * 1000) / 1000;
+      S.clip.banner_y = Math.round(ny * 1000) / 1000;
+      box.style.left = (S.clip.banner_x * 100).toFixed(1) + '%';
+      box.style.top = (S.clip.banner_y * 100).toFixed(1) + '%';
+    };
+
+    box.onpointerup = box.onpointercancel = async ev => {
+      box.classList.remove('dragging');
+      box.onpointermove = null;
+      box.onpointerup = null;
+      box.onpointercancel = null;
+      if(moved){
+        await save({ banner_x: S.clip.banner_x, banner_y: S.clip.banner_y });
+        toast('Title card moved.');
+      }
+    };
+  };
+}
+function markSeg(){
+  const c=S.clip;if(!c)return;
+  $('#layout').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.l===c.layout));
+  $('#res').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.r===c.res));
+  if($('#aspectRatio'))$('#aspectRatio').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.aspect===(c.aspect_ratio||'9:16')));
+  if($('#camShape'))$('#camShape').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.shape===(c.cam_shape||'rect')));
+  if($('#bannerStyle'))$('#bannerStyle').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.bs===(c.banner_style||'white_box')));
+  if($('#bannerFont'))$('#bannerFont').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.bf===(c.banner_font||'Impact')));
+  if($('#capFont'))$('#capFont').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.cf===(c.caption_font||'Arial')));
+  if($('#snapGrid'))$('#snapGrid').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.snap===(c.cam_corner||'tr')));
+  if($('#dualSplitBox'))$('#dualSplitBox').hidden = c.layout !== 'stack';
+  const ph=$('#phone');
+  if(ph && c.aspect_ratio){
+    ph.style.aspectRatio = c.aspect_ratio==='1:1'?'1/1':c.aspect_ratio==='16:9'?'16/9':'9/16';
+  }
+}
+function updDur(){
+  const c=S.clip;
+  const txt=`${(c.end-c.start).toFixed(1)}s (In: ${fmtLong(c.start)} / Out: ${fmtLong(c.end)})`;
+  if($('#dur')) $('#dur').textContent=txt;
+  if($('#studioDurBadge')) $('#studioDurBadge').textContent=(c.end-c.start).toFixed(1)+'s';
+  if($('#inStartSec') && document.activeElement !== $('#inStartSec')) $('#inStartSec').value = c.start.toFixed(1);
+  if($('#inEndSec') && document.activeElement !== $('#inEndSec')) $('#inEndSec').value = c.end.toFixed(1);
+  if($('#inLenSec') && document.activeElement !== $('#inLenSec')) $('#inLenSec').value = (c.end - c.start).toFixed(1);
+  if($('#clipLenBadge')) $('#clipLenBadge').textContent = (c.end-c.start).toFixed(1)+'s';
+}
+async function saveSfx(list){await save({sfx:list});drawSfx();drawTrim()}
 function playSfx(x){try{const a=new Audio('/api/audio/sfx/'+encodeURIComponent(x.f));a.volume=Math.min(1,x.v);a.play()}catch{}}
-function drawSfx(){const box=$('#sfxList');if(!box||!S.clip)return;const c=S.clip,l=c.sfx||[];
+function drawSfx(){
+  const box=$('#sfxList');if(!box||!S.clip)return;const c=S.clip,l=c.sfx||[];
   box.innerHTML=l.map((x,i)=>{const out=x.t<c.start||x.t>=c.end;return `<div class="sfxi${out?' out':''}" data-i="${i}" ${out?'title="Outside the clip, so it is not used"':''}>
     <button data-a="play" title="Listen" aria-label="Listen">▶</button><select data-k="f" aria-label="Effect">${optList(S.audio.sfx,x.f)}</select>
     <input data-k="t" type="number" step="0.1" value="${(x.t-c.start).toFixed(1)}" aria-label="Seconds into the clip" title="Seconds into the clip">
     <input data-k="v" type="range" min="0" max="1.5" step="0.05" value="${x.v}" aria-label="Volume" title="Volume">
     <button data-a="go" title="Jump here" aria-label="Jump here">⌖</button><button data-a="del" title="Remove" aria-label="Remove">✕</button></div>`}).join('');
-  drawTrim()}
+  drawTrim();
+}
 function sfxTick(){const v=$('#pv');if(!v||!S.clip)return;const t=v.currentTime,p=S.lastT??t;S.lastT=t;
   if(v.paused||v.muted||t<p||t-p>.5)return;(S.clip.sfx||[]).forEach(x=>{if(x.t>p&&x.t<=t)playSfx(x)})}
-const T={lo:0,hi:1,drag:false};
+const T={lo:0,hi:1,drag:false,view:'clip'};
 function tlTotal(){const v=$('#pv');return v&&isFinite(v.duration)&&v.duration>0?v.duration:(S.video&&S.video.duration)||S.clip.end+30}
 function drawTrim(s,e){
-  if(!$('#trk')||!S.clip)return;s=s??S.clip.start;e=e??S.clip.end;
-  if(!T.drag){const pad=Math.max(10,(S.clip.end-S.clip.start)*.6);T.lo=Math.max(0,S.clip.start-pad);T.hi=Math.max(T.lo+1,Math.min(tlTotal(),S.clip.end+pad))}
+  if(!$('#tsel')||!S.clip)return;s=s??S.clip.start;e=e??S.clip.end;
+  const total=tlTotal();
+  if(!T.drag){
+    if(T.view==='full'){
+      T.lo=0;
+      T.hi=Math.max(total, e + 1);
+    }else{
+      const pad=Math.max(20,(S.clip.end-S.clip.start)*.8);
+      T.lo=Math.max(0,S.clip.start-pad);
+      T.hi=Math.max(T.lo+1,Math.min(total,S.clip.end+pad));
+    }
+  }
   const X=t=>(t-T.lo)/(T.hi-T.lo)*100;
   $('#tsel').style.left=X(s)+'%';$('#tsel').style.width=Math.max(0,X(e)-X(s))+'%';
-  $('#tlo').textContent=fmtLong(T.lo);$('#thi').textContent=fmtLong(T.hi);$('#tlen').textContent=(e-s).toFixed(1)+'s';
+  
+  // Hook strip track
+  const hStrip=$('#tlHookStrip');
+  if(hStrip){
+    let [bs,be]=bannerSpan();if(T.drag&&S.clip.banner_start==null&&S.clip.banner_end==null){bs=s;be=e}
+    hStrip.style.left=X(bs)+'%';hStrip.style.width=Math.max(0,X(be)-X(bs))+'%';
+    const w=$('#bannerWhen'),whole=S.clip.banner_start==null&&S.clip.banner_end==null;
+    if(w)w.textContent=whole?'Shows for the whole clip.':`Shows from ${(bs-S.clip.start).toFixed(1)}s to ${(be-S.clip.start).toFixed(1)}s of the clip.`;
+  }
+
+  // Time ruler marks
+  const ruler=$('#tlRuler');
+  if(ruler){
+    const step=Math.max(1,Math.round((T.hi-T.lo)/8));
+    let marks='';
+    for(let t=Math.ceil(T.lo/step)*step;t<=T.hi;t+=step){
+      marks+=`<div class="tl-ruler-mark" style="left:${X(t)}%">${fmtLong(t)}</div>`;
+    }
+    ruler.innerHTML=marks;
+  }
+
+  // Waveform
   const c=S.video&&S.video.curve,svg=$('#twave');
   if(!c||S.clip.stream_offset)svg.innerHTML='';
   else{const n=c.v.length,dur=S.video.duration||1,p=[];
     for(let i=0;i<=80;i++){const t=T.lo+(T.hi-T.lo)*i/80,y=c.v[Math.min(n-1,Math.floor(t/dur*n))]||0;p.push((i/80*100).toFixed(2)+','+(30-y*26).toFixed(2))}
     svg.innerHTML=`<path d="M0,30 L${p.join(' L')} L100,30 Z" fill="#8c9bff40"/>`}
-  $('#tsfx').innerHTML=(S.clip.sfx||[]).filter(x=>x.t>=T.lo&&x.t<=T.hi).map(x=>`<i style="left:${X(x.t)}%" title="${esc(x.f)}"></i>`).join('');
-  drawPh()}
-function drawPh(){const v=$('#pv'),p=$('#tph');if(!v||!p)return;const t=v.currentTime;p.hidden=t<T.lo||t>T.hi;p.style.left=(t-T.lo)/(T.hi-T.lo)*100+'%'}
-function trimEvents(){
-  const trk=$('#trk'),v=$('#pv');
-  trk.onpointerdown=e=>{
-    const r=trk.getBoundingClientRect(),at=x=>T.lo+(T.hi-T.lo)*Math.min(1,Math.max(0,(x-r.left)/r.width)),h=e.target.dataset.h;
-    if(!h){v.currentTime=at(e.clientX);drawPh();return}
-    e.preventDefault();trk.setPointerCapture(e.pointerId);T.drag=true;let s=S.clip.start,en=S.clip.end;
-    trk.onpointermove=m=>{const t=at(m.clientX);if(h==='s')s=Math.min(t,en-3);else en=Math.max(t,s+3);
-      drawTrim(s,en);$('#st').value=s.toFixed(1);$('#en').value=en.toFixed(1);v.currentTime=h==='s'?s:en};
-    trk.onpointerup=trk.onpointercancel=guard(async()=>{trk.onpointermove=trk.onpointerup=trk.onpointercancel=null;T.drag=false;
-      if(Math.abs(s-S.clip.start)>.05||Math.abs(en-S.clip.end)>.05)await setTimes(+s.toFixed(2),+en.toFixed(2));else drawTrim()})};
+
+  // Subtitle cue blocks track
+  const tlSubs=$('#tlSubs');
+  if(tlSubs){
+    tlSubs.innerHTML=(S.cues||[]).filter(q=>q.end>=T.lo&&q.start<=T.hi).map((q,idx)=>`
+      <div class="tl-cue-block" style="left:${X(q.start)}%;width:${Math.max(2,X(q.end)-X(q.start))}%" title="${esc(q.text)}" onclick="seekTo(${q.start})">
+        ${esc(q.text)}
+      </div>
+    `).join('');
+  }
+
+  // Draggable SFX chips track
+  const tlSfx=$('#tsfx');
+  if(tlSfx){
+    tlSfx.innerHTML=(S.clip.sfx||[]).filter(x=>x.t>=T.lo&&x.t<=T.hi).map((x,idx)=>`
+      <div class="tl-sfx-chip" style="left:${X(x.t)}%" data-idx="${idx}" title="${esc(x.f)} (${x.t.toFixed(1)}s)">
+        <span onclick="playSfx(S.clip.sfx[${idx}])" title="Listen">▶</span>
+        <span>${esc(x.f.replace(/\.[^/.]+$/,''))}</span>
+        <button class="sfx-del" onclick="guard(()=>saveSfx(S.clip.sfx.filter((_,j)=>j!==${idx})))()" title="Remove">✕</button>
+      </div>
+    `).join('');
+    initSfxDrag();
+  }
+
+  drawPh();
+  updDur();
 }
-async function setTimes(s,e){await save({start:s,end:e});$('#st').value=S.clip.start.toFixed(1);$('#en').value=S.clip.end.toFixed(1);drawTrim();
-  await loadCues();drawCues();updDur();const v=$('#pv');v.currentTime=S.clip.start;drawCaption();loadFraming()}
+
+function seekTo(relStart){
+  const v=$('#pv');
+  if(v&&S.clip){
+    v.currentTime=S.clip.start+relStart;
+    drawPh();
+    updateTimeCode();
+  }
+}
+
+function initSfxDrag(){
+  const chips=document.querySelectorAll('.tl-sfx-chip'), wrap=$('#tlCanvasWrap');
+  if(!wrap)return;
+  chips.forEach(chip=>{
+    chip.onpointerdown=e=>{
+      if(e.target.closest('.sfx-del')||e.target.tagName==='SPAN'&&e.target.textContent==='▶')return;
+      chip.setPointerCapture(e.pointerId);
+      chip.classList.add('dragging');
+      const idx=+chip.dataset.idx, sfxItem=S.clip.sfx[idx];
+      const r=wrap.getBoundingClientRect();
+      chip.onpointermove=m=>{
+        const pct=Math.max(0,Math.min(1,(m.clientX-r.left)/r.width));
+        const newT=+(T.lo+(T.hi-T.lo)*pct).toFixed(2);
+        chip.style.left=pct*100+'%';
+        sfxItem.t=newT;
+      };
+      chip.onpointerup=chip.onpointercancel=guard(async()=>{
+        chip.onpointermove=chip.onpointerup=chip.onpointercancel=null;
+        chip.classList.remove('dragging');
+        await saveSfx([...S.clip.sfx]);
+        toast('SFX timing updated.');
+      });
+      e.stopPropagation();
+    };
+  });
+}
+
+function drawPh(){
+  const v=$('#pv'),p=$('#tph');if(!v||!p)return;
+  const t=v.currentTime;
+  p.hidden=t<T.lo||t>T.hi;
+  p.style.left=((t-T.lo)/(T.hi-T.lo)*100)+'%';
+}
+
+function trimEvents(){
+  const trk=$('#tlVideoTrack'),v=$('#pv');
+  if(!trk||!v)return;
+  trk.onpointerdown=e=>{
+    const r=trk.getBoundingClientRect();
+    const at=x=>T.lo+(T.hi-T.lo)*Math.min(1,Math.max(0,(x-r.left)/r.width));
+    const h=e.target.dataset.h;
+    const isRange=e.target.closest('#tsel');
+    if(!h && !isRange){
+      v.currentTime=at(e.clientX);
+      drawPh();
+      updateTimeCode();
+      return;
+    }
+    e.preventDefault();
+    trk.setPointerCapture(e.pointerId);
+    T.drag=true;
+    let s=S.clip.start, en=S.clip.end;
+    const initialS = s, initialEn = en, initialLen = Math.max(1.0, en - s);
+    const startT = at(e.clientX);
+    const total = tlTotal();
+
+    trk.onpointermove=m=>{
+      const t = at(m.clientX);
+      if(h==='s'){
+        s = Math.max(0, Math.min(t, en - 1.0));
+      } else if(h==='e'){
+        en = Math.min(total, Math.max(t, s + 1.0));
+      } else if(isRange){
+        const dt = t - startT;
+        s = Math.max(0, Math.min(total - initialLen, initialS + dt));
+        en = s + initialLen;
+      }
+      drawTrim(s, en);
+      v.currentTime = h==='e' ? en : s;
+      updateTimeCode();
+    };
+
+    trk.onpointerup=trk.onpointercancel=guard(async()=>{
+      trk.onpointermove=trk.onpointerup=trk.onpointercancel=null;
+      T.drag=false;
+      if(Math.abs(s-S.clip.start)>0.05 || Math.abs(en-S.clip.end)>0.05){
+        await setTimes(+s.toFixed(2), +en.toFixed(2));
+      } else {
+        drawTrim();
+      }
+    });
+  };
+}
+
+async function setTimes(s,e){
+  await save({start:s,end:e});
+  drawTrim();await loadCues();drawCues();updDur();
+  const v=$('#pv');v.currentTime=S.clip.start;drawCaption();drawBanner();loadFraming();updateTimeCode();
+}
+
 function posAt(t){const p=S.framing&&S.framing.pts;if(!p||!p.length)return null;let lo=0,hi=p.length-1;
   while(hi-lo>1){const m=(lo+hi)>>1;p[m][0]<=t?lo=m:hi=m}
   const a=p[lo],b=p[hi];if(t<=a[0])return a[1];if(t>=b[0])return b[1];return a[1]+(b[1]-a[1])*(t-a[0])/Math.max(b[0]-a[0],1e-6)}
+
 function drawStack(v,f,c){
-  const cv=$('#stackcv'),g=cv.getContext('2d'),W=cv.width,H=cv.height,th=Math.round(H*f.top),bh=H-th;
-  if(!v.videoWidth)return;const k=v.videoWidth/f.w,[x,y,w,h]=(f.pip&&f.box?f.box:f.cam).map(n=>n*k);
-  if(f.pip){const vh=v.videoHeight,gw=vh*9/16,gx=(v.videoWidth-gw)*c.crop_x,pw=W*f.size,ph=pw*h/w;
-    g.drawImage(v,gx,0,gw,vh,0,0,W,H);g.drawImage(v,x,y,w,h,(W-pw)/2,H*f.ptop,pw,ph);return}
-  const vh=v.videoHeight,gw=Math.min(v.videoWidth,vh*W/bh),gx=(v.videoWidth-gw)*c.crop_x;
-  g.drawImage(v,x,y,w,h,0,0,W,th);g.drawImage(v,gx,0,gw,vh,0,th,W,bh)}
-function drawBlur(v,cv){   // like the render: blurred fill behind the whole picture
+  const cv=$('#stackcv');
+  if(!cv||!v.videoWidth||v.readyState<1) return;
+  const ph=$('#phone');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const pw = (ph && ph.clientWidth) || 270, ph_h = (ph && ph.clientHeight) || 480;
+  if(cv.width !== Math.round(pw * dpr) || cv.height !== Math.round(ph_h * dpr)){
+    cv.width = Math.round(pw * dpr);
+    cv.height = Math.round(ph_h * dpr);
+  }
+  const g=cv.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.scale(dpr, dpr);
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  const W = pw, H = ph_h;
+  g.clearRect(0, 0, W, H);
+  const vw = v.videoWidth, vh = v.videoHeight;
+  const fw = (f && f.w) || vw, fh = (f && f.h) || vh;
+  const k = vw / fw;
+
+  // Determine streamer source bounding box in source video
+  let box = null;
+  const corner = c.cam_corner;
+  if(corner && corner !== 'custom'){
+    if(corner === 'tl') box = [0, 0, Math.round(vw * 0.35), Math.round(vh * 0.50)];
+    else if(corner === 'bl') box = [0, Math.round(vh * 0.45), Math.round(vw * 0.35), Math.round(vh * 0.55)];
+    else if(corner === 'br') box = [Math.round(vw * 0.65), Math.round(vh * 0.45), Math.round(vw * 0.35), Math.round(vh * 0.55)];
+    else if(corner === 'tc') box = [Math.round(vw * 0.325), 0, Math.round(vw * 0.35), Math.round(vh * 0.50)];
+    else if(corner === 'bc') box = [Math.round(vw * 0.325), Math.round(vh * 0.45), Math.round(vw * 0.35), Math.round(vh * 0.55)];
+    else if(corner === 'tr') box = [Math.round(vw * 0.65), 0, Math.round(vw * 0.35), Math.round(vh * 0.50)];
+  }
+  if(!box){
+    if(f && f.box) box = f.box;
+    else if(f && f.cam) box = f.cam;
+    else if(S.video && S.video.cam_box){
+      try { box = JSON.parse(S.video.cam_box); } catch(e){}
+    }
+  }
+  if(!box){
+    box = [0, Math.round(vh * 0.45), Math.round(vw * 0.35), Math.round(vh * 0.55)];
+  }
+  
+  let [cx, cy, cw, ch] = box.map(n => Math.round(n * k));
+  cw = Math.max(32, Math.min(vw, cw));
+  ch = Math.max(32, Math.min(vh, ch));
+  cx = Math.max(0, Math.min(vw - cw, cx));
+  cy = Math.max(0, Math.min(vh - ch, cy));
+
+  const isPip = c.layout === 'pip';
+  const shape = c.cam_shape || 'rect';
+  const zoom = Math.max(0.4, Math.min(3.0, c.cam_zoom || 1.0));
+
+  if(isPip){
+    // 1-2. Gameplay fills the whole vertical frame, with zoom (wheel / slider) and pan (drag / Pan X-Y), like the render
+    const gz = Math.max(0.4, Math.min(3.0, c.game_zoom || 1.0)), ga = W / H;
+    let ggw, ggh;
+    if(vw / vh > ga){ ggh = Math.min(vh, vh / gz); ggw = Math.min(vw, ggh * ga); }
+    else { ggw = Math.min(vw, vw / gz); ggh = Math.min(vh, ggw / ga); }
+    const gpx = typeof c.crop_x === 'number' ? c.crop_x : 0.5, gpy = typeof c.crop_y === 'number' ? c.crop_y : 0.5;
+    g.drawImage(v, Math.max(0, (vw - ggw) * gpx), Math.max(0, (vh - ggh) * gpy), ggw, ggh, 0, 0, W, H);
+
+    // 3. Floating Streamer Reaction Camera
+    const pw = Math.round(W * (shape === 'circle' ? 0.44 : 0.48));
+    const ph_cam = shape === 'circle' ? pw : Math.round(pw * (ch / cw));
+    let px = Math.round((W - pw) * Math.max(0, Math.min(1, c.cam_pos_x ?? 0.5)));
+    let py = Math.round((H - ph_cam) * Math.max(0, Math.min(1, c.cam_pos_y ?? 0.65)));
+    if(c.cam_pos === 'pip_top') py = Math.round(H * 0.12);
+    else if(c.cam_pos === 'pip_center') py = Math.round((H - ph_cam) / 2);
+
+    S.camBox = { x: px, y: py, w: pw, h: ph_cam, shape: shape };
+
+    const zw = Math.min(vw, cw / zoom);
+    const zh = Math.min(vh, ch / zoom);
+    const zx = Math.max(0, Math.min(vw - zw, cx + cw/2 - zw/2));
+    const zy = Math.max(0, Math.min(vh - zh, cy + ch/2 - zh/2));
+
+    g.save();
+    if(shape === 'circle'){
+      g.beginPath();
+      g.arc(px + pw/2, py + ph_cam/2, Math.min(pw, ph_cam)/2, 0, Math.PI * 2);
+      g.clip();
+      g.drawImage(v, zx, zy, zw, zh, px, py, pw, ph_cam);
+      g.restore();
+      g.beginPath();
+      g.arc(px + pw/2, py + ph_cam/2, Math.min(pw, ph_cam)/2, 0, Math.PI * 2);
+      g.strokeStyle = '#8c9bff';
+      g.lineWidth = 2.5;
+      g.stroke();
+    } else {
+      g.beginPath();
+      if(typeof g.roundRect === 'function'){
+        g.roundRect(px, py, pw, ph_cam, 8);
+      } else {
+        g.rect(px, py, pw, ph_cam);
+      }
+      g.clip();
+      g.drawImage(v, zx, zy, zw, zh, px, py, pw, ph_cam);
+      g.restore();
+      g.beginPath();
+      if(typeof g.roundRect === 'function'){
+        g.roundRect(px, py, pw, ph_cam, 8);
+      } else {
+        g.rect(px, py, pw, ph_cam);
+      }
+      g.strokeStyle = '#8c9bff';
+      g.lineWidth = 2.5;
+      g.stroke();
+    }
+
+    // Drag badge
+    g.fillStyle = '#0f1424ee';
+    g.beginPath();
+    if(typeof g.roundRect === 'function'){
+      g.roundRect(px + pw/2 - 32, py + 4, 64, 18, 4);
+    } else {
+      g.rect(px + pw/2 - 32, py + 4, 64, 18);
+    }
+    g.fill();
+    g.fillStyle = '#fff';
+    g.font = 'bold 9.5px sans-serif';
+    g.textAlign = 'center';
+    g.fillText('✥ Drag Cam', px + pw/2, py + 16);
+    return;
+  }
+
+  // Dual-Cam Stack Mode: Splits into 2 stacked screens
+  const topShare = Math.max(0.25, Math.min(0.75, c.split_ratio || 0.5));
+  // cam_pos 'bottom' OR a bottom corner code (bl/br/bc) means streamer is on bottom
+  const _bottomCorners = new Set(['bl','br','bc']);
+  const isStreamerBottom = c.cam_pos === 'bottom' || _bottomCorners.has(c.cam_pos);
+  const th = Math.round(H * topShare), bh = H - th;
+
+  const streamH = isStreamerBottom ? bh : th;
+  const gameH = isStreamerBottom ? th : bh;
+  const streamY = isStreamerBottom ? th : 0;
+  const gameY = isStreamerBottom ? 0 : th;
+  const dividerY = th;
+
+  // 1. Gameplay Screen with game_zoom and crop_x, crop_y
+  const gameZoom = Math.max(0.4, Math.min(3.0, c.game_zoom || 1.0));
+  const gameAspect = W / gameH;
+  let ggw, ggh;
+  if(vw / vh > gameAspect){
+    ggh = Math.min(vh, vh / gameZoom);
+    ggw = Math.min(vw, ggh * gameAspect);
+  } else {
+    ggw = Math.min(vw, vw / gameZoom);
+    ggh = Math.min(vh, ggw / gameAspect);
+  }
+  const panGx = typeof c.crop_x === 'number' ? c.crop_x : 0.5;
+  const panGy = typeof c.crop_y === 'number' ? c.crop_y : 0.5;
+  const gx = Math.max(0, Math.min(vw - ggw, (vw - ggw) * panGx));
+  const gy = Math.max(0, Math.min(vh - ggh, (vh - ggh) * panGy));
+  g.drawImage(v, gx, gy, ggw, ggh, 0, gameY, W, gameH);
+
+  // 2. Streamer Reaction Camera
+  const topAspect = W / streamH;
+  let zw, zh;
+  if(cw / ch > topAspect){
+    zh = Math.min(vh, ch / zoom);
+    zw = Math.min(vw, zh * topAspect);
+  } else {
+    zw = Math.min(vw, cw / zoom);
+    zh = Math.min(vh, zw / topAspect);
+  }
+  const panX = typeof c.cam_crop_x === 'number' ? c.cam_crop_x : 0.5;
+  const panY = typeof c.cam_crop_y === 'number' ? c.cam_crop_y : 0.5;
+  const zx = Math.max(0, Math.min(vw - zw, cx + (cw - zw) * panX));
+  const zy = Math.max(0, Math.min(vh - zh, cy + (ch - zh) * panY));
+
+  g.save();
+  g.drawImage(v, zx, zy, zw, zh, 0, streamY, W, streamH);
+  g.restore();
+
+  // 3. Divider Accent Line between Streamer and Gameplay
+  g.fillStyle = '#6366f1';
+  g.fillRect(0, dividerY - 2, W, 4);
+  
+  // Center Grip Pill
+  g.fillStyle = '#ffffff';
+  g.beginPath();
+  if(typeof g.roundRect === 'function'){
+    g.roundRect(W / 2 - 20, dividerY - 3.5, 40, 7, 3);
+  } else {
+    g.fillRect(W / 2 - 20, dividerY - 3.5, 40, 7);
+  }
+  g.fill();
+}
+
+function drawBlur(v,cv){
   const g=cv.getContext('2d'),W=cv.width,H=cv.height,vw=v.videoWidth,vh=v.videoHeight,cw=vh*W/H,h=W*vh/vw;
   g.filter='blur(12px) brightness(.7)';g.drawImage(v,(vw-cw)/2,0,cw,vh,-20,-20,W+40,H+40);g.filter='none';
-  g.drawImage(v,0,(H-h)/2,W,h)}
-function applyLayout(){const v=$('#pv');if(!v||!S.clip)return;const c=S.clip,f=S.framing;
-  const stack=['stack','pip'].includes(c.layout)&&f&&f.stack&&f.cam,cv=$('#stackcv');
-  const blur=v.videoWidth&&(c.layout==='blur'||(['stack','pip'].includes(c.layout)&&f&&f.stack&&!f.cam));
-  cv.hidden=!stack&&!blur;v.style.visibility=stack||blur?'hidden':'';if(stack)drawStack(v,f,c);else if(blur)drawBlur(v,cv);
-  v.style.objectFit=(c.layout==='blur'||(['stack','pip'].includes(c.layout)&&f&&f.stack&&!f.cam))?'contain':'cover';
+  g.drawImage(v,0,(H-h)/2,W,h);
+}
+
+function applyLayout(){
+  const v=$('#pv');if(!v||!S.clip)return;const c=S.clip,f=S.framing;
+  const isStackOrPip = ['stack','pip'].includes(c.layout);
+  const stack = isStackOrPip && v.videoWidth;
+  const cv=$('#stackcv');
+  const blur=v.videoWidth&&(c.layout==='blur'||(!isStackOrPip&&!['follow','crop'].includes(c.layout)));
+  
+  if(!stack && !blur){
+    if(cv) cv.hidden=true;
+    v.style.visibility='';
+    v.style.objectFit='cover';
+  } else {
+    if(cv) cv.hidden=false;
+    v.style.visibility='';
+    if(v.readyState >= 1){
+      if(stack) drawStack(v,f,c);
+      else if(blur) drawBlur(v,cv);
+    } else {
+      v.addEventListener('loadeddata',()=>applyLayout(),{once:true});
+      v.addEventListener('canplay',()=>applyLayout(),{once:true});
+    }
+  }
+  v.style.objectFit=(c.layout==='blur')?'contain':'cover';
   let x=.5;if(c.layout==='crop')x=c.crop_x;else if(c.layout==='follow'){const p=posAt(v.currentTime-c.start);x=p==null?.5:p}
-  v.style.objectPosition=(x*100)+'% 50%'}
+  let y = typeof c.crop_y === 'number' ? c.crop_y : 0.5;
+  v.style.objectPosition=(x*100)+'% '+(y*100)+'%';
+}
 function sizePhone(){const p=$('#phone'),w=$('#editor').clientWidth;if(p)p.style.setProperty('--w',(w>260?Math.min(236,w-80):236)+'px')}
-function playClip(){const v=$('#pv');if(!v.paused){v.pause();return}if(v.currentTime<S.clip.start||v.currentTime>=S.clip.end-.05)v.currentTime=S.clip.start;v.play()}
-function onTime(){const v=$('#pv');if(!v||!S.clip)return;drawPh();if(v.currentTime>=S.clip.end){if($('#loop').checked){v.currentTime=S.clip.start}else v.pause()}drawCaption()}
+function playClip(){
+  const v=$('#pv');if(!v||!S.clip)return;
+  const c = S.clip;
+  const isCut = (v.duration && v.duration <= (c.end - c.start) + 2.5);
+  const startLimit = isCut ? 0 : c.start;
+  const endLimit = isCut ? (c.end - c.start) : c.end;
+  if(!v.paused){v.pause();return}
+  if(v.currentTime < startLimit || v.currentTime >= endLimit - 0.05) v.currentTime = startLimit;
+  v.play();
+}
+function onTime(){
+  const v=$('#pv');if(!v||!S.clip)return;
+  drawPh();
+  const c = S.clip;
+  const isCut = (v.duration && v.duration <= (c.end - c.start) + 2.5);
+  const endLimit = isCut ? (c.end - c.start) : c.end;
+  const startLimit = isCut ? 0 : c.start;
+  if(v.currentTime >= endLimit){
+    if($('#loop').checked){v.currentTime = startLimit} else v.pause();
+  }
+  drawCaption();
+  applyLayout();
+}
 function drawCaption(){
   const v=$('#pv'),cap=$('#cap'),c=S.clip;if(!v||!cap||!c)return;
   const t=S.tpl[c.template];if(!t||!c.captions){cap.innerHTML='';return}
-  const rel=v.currentTime-c.start,cue=S.cues.find(q=>rel>=q.start-.001&&rel<q.end);
+  if((!S.cues || !S.cues.length) && c.captions){
+    if(!S._loadingCues && S.cid){
+      S._loadingCues = true;
+      loadCues().then(()=>{ S._loadingCues = false; drawCaption(); drawCues(); }).catch(()=>{ S._loadingCues = false; });
+    }
+  }
+  let rel = v.currentTime;
+  const isFull = (v.duration && v.duration > (c.end - c.start) + 2.5) || rel >= c.start - 0.5;
+  if(isFull) rel = rel - c.start;
+  rel = Math.max(0, rel);
+
+  const cue = (S.cues || []).find(q => rel >= (q.start - 0.05) && rel < (q.end + 0.05));
   if(!cue){cap.innerHTML='';return}
-  let act=0;cue.words.forEach((w,i)=>{if(rel>=w.start-.001)act=i});
+  let act=0;
+  (cue.words || []).forEach((w,i)=>{if(rel >= (w.start - 0.02)) act=i});
   const W=$('#phone').clientWidth,k=W/1080;
-  const words=t.mode==='word'?[[cue.words[act],act]]:cue.words.map((w,i)=>[w,i]);
-  const html=words.map(([w,i])=>{const on=i===act;const sc=t.scale_active&&on?`transform:scale(${t.scale_active/100});`:'';
-    return `<span style="color:${on?t.active:t.primary};${sc}">${esc(t.upper?w.w.toUpperCase():w.w)}</span>`}).join(' ');
-  cap.style.cssText=`bottom:${(t.mv/1920*100).toFixed(1)}%;font:${t.bold?800:400} ${(t.size*k).toFixed(1)}px/1.15 Arial,Helvetica,sans-serif;text-shadow:${t.box?'none':tplShadow(t,k)}${t.glow?',0 0 '+(10*k*4).toFixed(0)+'px '+t.outline:''}`;
+  const words=t.mode==='word'?[[(cue.words || [])[act] || {w:''},act]]:(cue.words || []).map((w,i)=>[w,i]);
+  const html=words.map(([w,i])=>{
+    if(!w) return '';
+    const on=i===act;
+    const sc=t.scale_active&&on?`transform:scale(${t.scale_active/100});`:'';
+    return `<span style="color:${on?t.active:t.primary};${sc}">${esc(t.upper?w.w.toUpperCase():w.w)}</span>`;
+  }).join(' ');
+  const csz = typeof c.caption_size === 'number' ? c.caption_size : 1.0;
+  const cfont = c.caption_font || t.font || 'Arial';
+  cap.style.cssText=`bottom:${(t.mv/1920*100).toFixed(1)}%;font:${t.bold?800:400} ${(t.size*k*csz).toFixed(1)}px/1.15 ${cfont},Helvetica,sans-serif;text-shadow:${t.box?'none':tplShadow(t,k)}${t.glow?',0 0 '+(10*k*4).toFixed(0)+'px '+t.outline:''}`;
   cap.innerHTML=t.box?`<span style="background:#000b;padding:.1em .35em;border-radius:4px">${html}</span>`:html;
 }
 function drawCues(){
@@ -579,19 +2482,29 @@ function drawCues(){
     inp.onchange=guard(async()=>{const q=S.cues[+inp.dataset.q];S.cues=await send('PATCH','/api/clips/'+S.cid+'/cue',{first:q.first,last:q.last,text:inp.value});drawCues();drawCaption();toast('Caption updated.')})});
 }
 function updateApproveUI(){
-  const b=$('#approve');if(!b||!S.clip)return;const c=S.clip,fill=b.querySelector('.fill'),lab=b.querySelector('span');
+  const b=$('#approve');if(!b||!S.clip)return;const c=S.clip;
+  let fill=b.querySelector('.fill'),lab=b.querySelector('span');
+  /* graceful fallback if button has no .fill / span yet */
+  if(!lab){b.innerHTML='<i class="fill" style="position:absolute;left:0;top:0;bottom:0;width:0;background:#4ade8044;border-radius:inherit;transition:width .3s"></i><span></span>';b.style.position='relative';b.style.overflow='hidden';fill=b.querySelector('.fill');lab=b.querySelector('span')}
   const rs=c.render_status,busy=rs==='queued'||rs==='running';
-  b.disabled=busy;fill.style.width=busy?Math.max(6,c.render_progress||0)+'%':'0';
+  b.disabled=busy;if(fill)fill.style.width=busy?Math.max(6,c.render_progress||0)+'%':'0';
   let txt;
   if(busy)txt=rs==='queued'?'Waiting…':`Preparing ${Math.round(c.render_progress||0)}%`;
   else if(rs==='failed')txt='Try again';
   else if(c.status==='approved'&&c.rendered&&rs==='done')txt=c.downloaded?'Saved ✓  Download again':'Download';
-  else txt='Approve and download';
-  if(lab.dataset.t!==txt){lab.dataset.t=txt;lab.innerHTML=txt.includes('✓')?txt.replace('✓','<b class="check">✓</b>'):esc(txt)}
-  const q=$('#qcbox'),qk=JSON.stringify(c.qc);
-  if(q&&q.dataset.k!==qk){q.dataset.k=qk;q.innerHTML=c.qc==null?'':'<label>Quality check</label>'+(c.qc.length?`<ul class="why">${c.qc.map(x=>`<li style="color:var(--${x.level==='fail'?'low':'mid'})">${x.level==='fail'?'Problem':'Check'}: ${esc(x.msg)}</li>`).join('')}</ul>`:'<p class="small" style="color:var(--good);margin:0">Looks good ✓</p>')}
-  const cv=$('#cover');if(cv)cv.hidden=!(c.rendered&&rs==='done');
-  const err=$('#rerr');if(rs==='failed'&&!err){const e=document.createElement('p');e.id='rerr';e.className='small';e.style.cssText='color:var(--low);margin:0';e.textContent=c.render_error||'The clip could not be made.';$('#editor .edbody').appendChild(e)}
+  else txt='🚀 Approve & Export';
+  if(lab&&lab.dataset.t!==txt){lab.dataset.t=txt;lab.innerHTML=txt.includes('✓')?txt.replace('✓','<b class="check">✓</b>'):esc(txt)}
+  const q=$('#qcbox');
+  if(q){
+    const qk=JSON.stringify(c.qc);
+    if(q.dataset.k!==qk){
+      q.dataset.k=qk;
+      q.innerHTML=c.qc==null?'':'<label style="font-size:12px;font-weight:700;color:var(--text)">Quality check</label>'+(c.qc.length?`<ul class="why" style="margin-top:4px">${c.qc.map(x=>`<li style="color:var(--${x.level==='fail'?'low':'mid'});font-size:12px">${x.level==='fail'?'Problem':'Check'}: ${esc(x.msg)}</li>`).join('')}</ul>`:'<p class="small" style="color:var(--good);margin:4px 0 0">Looks good ✓</p>');
+    }
+  }
+  const cv=$('#cover');
+  if(cv) cv.hidden=!(c.rendered&&rs==='done');
+  const err=$('#rerr');if(rs==='failed'&&!err){const ep=b.closest('.studio-head-right');if(ep){const e=document.createElement('p');e.id='rerr';e.className='small';e.style.cssText='color:var(--low);margin:4px 0 0';e.textContent=c.render_error||'The clip could not be made.';ep.appendChild(e)}}
   else if(rs!=='failed'&&err)err.remove();
 }
 document.addEventListener('keydown',e=>{
@@ -601,19 +2514,97 @@ document.addEventListener('keydown',e=>{
 window.addEventListener('resize',()=>{sizePhone();drawCaption();if($('#mapbox'))$('#mapbox').dataset.s='';drawMap()});
 
 /* ---------------- settings ---------------- */
-$('#setBtn').onclick=guard(async()=>{S.settings=await api('/api/settings');$('#s_model').value=S.settings.model;$('#s_key').value='';
-  $('#s_chan').value=S.settings.my_channel||'';api('/api/learn').then(r=>$('#s_learn').textContent=learnText(r)).catch(()=>{});
-  $('#s_state').textContent=S.settings.ai?(S.settings.ai_from_env?'AI scoring is on (key from the computer settings).':'AI scoring is on.'):'AI scoring is off.';$('#settings').showModal()});
-$('#s_close').onclick=()=>$('#settings').close();
-const learnText=r=>r.top.length?`Learned from ${r.with_views} clips. Your best ones had: ${r.top.join(', ')}. New clips are ranked with this.`
+function updateCookieUI(){
+  if(!S.settings)return;
+  $('#s_browser').value=S.settings.cookies_browser||'';
+  if(S.settings.has_cookies){
+    $('#s_ck_status').textContent='✓ cookies.txt active: Age-restricted YouTube videos will authenticate.';
+    $('#s_del_ck').hidden=false;
+  }else{
+    $('#s_ck_status').textContent='Upload cookies.txt or choose your browser to bypass 18+ YouTube age restrictions.';
+    $('#s_del_ck').hidden=true;
+  }
+  const mb=$('#mainCookieBadge');
+  if(mb){
+    if(S.settings.has_cookies){
+      mb.className='pill ok';
+      mb.innerHTML='<span style="color:#4ade80">●</span> Cookies: Active ('+esc(S.settings.cookies_file||'cookies.txt')+')';
+      mb.title='YouTube cookies auto-detected. Age-restricted videos unlocked. Click to open Settings.';
+    }else if(S.settings.cookies_browser){
+      mb.className='pill ok';
+      mb.innerHTML='<span style="color:#4ade80">●</span> Cookies: '+esc(S.settings.cookies_browser.toUpperCase());
+      mb.title='Reading cookies directly from '+S.settings.cookies_browser+'. Click to open Settings.';
+    }else{
+      mb.className='pill';
+      mb.innerHTML='<span style="color:#94a3b8">○</span> Cookies: None';
+      mb.title='No cookies loaded. Click to upload cookies.txt for age-restricted videos.';
+    }
+  }
+}
+async function refreshStorageUI(){
+  try{
+    const st=await api('/api/settings/storage');
+    if($('#st_exports'))$('#st_exports').textContent=st.exports_str||'0 B';
+    if($('#st_work'))$('#st_work').textContent=st.work_str||'0 B';
+    if($('#st_originals'))$('#st_originals').textContent=st.originals_str||'0 B';
+    if($('#st_live'))$('#st_live').textContent=st.live_str||'0 B';
+    if($('#s_retention'))$('#s_retention').value=String(st.cleanup_hours??48);
+  }catch(e){}
+}
+if($('#mainCookieBadge'))$('#mainCookieBadge').onclick=()=>$('#setBtn').click();
+const learnText=r=>r.top&&r.top.length?`Learned from ${r.with_views} clips. Your best ones had: ${r.top.join(', ')}. New clips are ranked with this.`
   :r.with_views<r.need?`${r.with_views} of ${r.need} clips have views. Post clips with their ClipForge title, then get views here (or type them in each clip).`
   :`${r.with_views} clips have views. No clear pattern yet.`;
-$('#s_fetch').onclick=guard(async()=>{$('#s_learn').textContent='Reading your channel…';
-  try{const r=await send('POST','/api/learn/fetch',{channel:$('#s_chan').value});$('#s_learn').textContent=`Found ${r.posts} posts, matched ${r.matched} to your clips. `+learnText(r)}
-  catch(e){$('#s_learn').textContent=e.message}});
-$('#s_save').onclick=guard(async()=>{const b={model:$('#s_model').value};if($('#s_key').value.trim())b.anthropic_key=$('#s_key').value.trim();
-  S.settings=await send('POST','/api/settings',b);$('#s_key').value='';$('#s_state').textContent=S.settings.ai?'Saved. AI scoring is on.':'Saved. AI scoring is off.'});
+if($('#s_fetch')) $('#s_fetch').onclick=guard(async()=>{
+  $('#s_learn').textContent='Reading your channel…';
+  try{
+    const r=await send('POST','/api/learn/fetch',{channel:$('#s_chan').value});
+    $('#s_learn').textContent=`Found ${r.posts} posts, matched ${r.matched} to your clips. `+learnText(r);
+  }catch(e){
+    $('#s_learn').textContent=e.message;
+  }
+});
+$('#setBtn').onclick=guard(async()=>{
+  S.settings=await api('/api/settings');$('#s_model').value=S.settings.model||'base';$('#s_key').value='';
+  if($('#s_chan')) $('#s_chan').value=S.settings.my_channel||'';
+  api('/api/learn').then(r=>{if($('#s_learn'))$('#s_learn').textContent=learnText(r)}).catch(()=>{});
+  updateCookieUI();
+  refreshStorageUI();
+  $('#s_state').textContent=S.settings.anthropic_key?(S.settings.ai_from_env?'AI scoring is on (key from the computer settings).':'AI scoring is on.'):'AI scoring is off.';$('#settings').showModal()});
+$('#s_close').onclick=()=>$('#settings').close();
+$('#s_upload_ck').onclick=()=>$('#s_file_ck').click();
+$('#s_file_ck').onchange=guard(async(e)=>{
+  const f=e.target.files[0];if(!f)return;
+  const fd=new FormData();fd.append('file',f);
+  await fetch('/api/settings/cookies/upload',{method:'POST',body:fd});
+  S.settings=await api('/api/settings');updateCookieUI();toast('cookies.txt uploaded!');
+});
+$('#s_del_ck').onclick=guard(async()=>{
+  await send('DELETE','/api/settings/cookies');
+  S.settings=await api('/api/settings');updateCookieUI();toast('cookies removed.');
+});
+$('#s_save').onclick=guard(async()=>{
+  const b={model:$('#s_model').value,cookies_browser:$('#s_browser').value};
+  if($('#s_key').value.trim())b.anthropic_key=$('#s_key').value.trim();
+  if($('#s_chan'))b.my_channel=$('#s_chan').value.trim();
+  if($('#s_retention'))b.cleanup_hours=parseInt($('#s_retention').value,10);
+  S.settings=await send('POST','/api/settings',b);$('#s_key').value='';
+  $('#s_state').textContent=S.settings.anthropic_key?'Saved. AI scoring is on.':'Saved. AI scoring is off.';
+  updateCookieUI();
+  refreshStorageUI();
+});
 $('#s_test').onclick=guard(async()=>{$('#s_state').textContent='Testing…';try{await send('POST','/api/settings/test');$('#s_state').textContent='The key works.'}catch(e){$('#s_state').textContent=e.message}});
+$('#s_cleanup_btn').onclick=guard(async()=>{
+  const btn=$('#s_cleanup_btn');
+  btn.disabled=true;btn.textContent='Cleaning…';
+  try{
+    const res=await send('POST','/api/settings/cleanup',{older_than_hours:0,clean_all_temp:true});
+    await refreshStorageUI();
+    toast(`Freed ${res.freed_mb||'0 MB'} of temporary cache! Saved videos preserved.`);
+  }finally{
+    btn.disabled=false;btn.textContent='🧹 Clean Now';
+  }
+});
 
 /* ---------------- polling ---------------- */
 let busyTick=false;
@@ -627,6 +2618,7 @@ async function tick(){
 }
 (async()=>{
   S.tpl=await api('/api/templates');S.audio=await api('/api/audio');S.clients=await api('/api/clients');
+  try{S.settings=await api('/api/settings');updateCookieUI()}catch{}
   try{$('#signout').hidden=!(await api('/api/me')).auth}catch{}
   try{const h=await api('/api/health');const m=[];
     if(!h.ffmpeg)m.push("FFmpeg isn't installed on this computer, so videos can't be imported or rendered. Run Install-Windows.bat.");

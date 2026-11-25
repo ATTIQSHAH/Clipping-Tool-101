@@ -44,51 +44,184 @@ def _audio_graph(music, music_vol, duck, sfx, first_input, vo=None):
     return ";".join(parts), inputs
 
 
+def _game_crop(w, h, ratio, game_zoom, crop_x, crop_y):
+    """Crop (cw, ch, x, y) of the source that fills a frame of this width/height ratio, zoomed and panned."""
+    gz = max(0.4, min(float(game_zoom or 1.0), 3.0))
+    if w / h > ratio:
+        ch = max(32, min(h, int(h / gz))) // 2 * 2
+        cw = max(32, min(w, int(ch * ratio))) // 2 * 2
+    else:
+        cw = max(32, min(w, int(w / gz))) // 2 * 2
+        ch = max(32, min(h, int(cw / ratio))) // 2 * 2
+    px = max(0.0, min(1.0, float(crop_x if crop_x is not None else 0.5)))
+    py = max(0.0, min(1.0, float(crop_y if crop_y is not None else 0.5)))
+    return cw, ch, int(min(max((w - cw) * px, 0), w - cw)) // 2 * 2, int(min(max((h - ch) * py, 0), h - ch)) // 2 * 2
+
+
+CORNER_BOX = {"tl": (0, 0, .35, .50), "tr": (.65, 0, .35, .50), "bl": (0, .45, .35, .55), "br": (.65, .45, .35, .55),
+              "tc": (.325, 0, .35, .50), "bc": (.325, .45, .35, .55)}
+
+
 def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="follow", crop_x=0.5,
                 encoder="libx264", fps=30, res=1080, music=None, music_vol=0.18, duck=True, sfx=(),
-                track=None, on_progress=None, vo=None):
-    W, H = RES[res]
+                track=None, hook_zoom=True, on_progress=None,
+                cam_zoom=1.0, cam_shape="rect", cam_pos="top", cam_pos_x=0.5, cam_pos_y=0.65, split_ratio=0.5,
+                cam_crop_x=0.5, cam_crop_y=0.5, cam_corner="tr", aspect_ratio="9:16",
+                game_zoom=1.0, crop_y=0.5, vo=None):
+    base = int(res or 1080)
+    aspect = str(aspect_ratio or "9:16").strip()
+    if aspect == "1:1":
+        W, H = base, base
+    elif aspect == "16:9":
+        H = base
+        W = int(base * 16 / 9) // 2 * 2
+    else:  # "9:16" default
+        W = base
+        H = int(base * 16 / 9) // 2 * 2
+
     w, h = info["w"], info["h"]
-    dur = end - start
+    s = max(0.0, float(start))
+    dur = max(0.5, float(end) - s)
+    if dur <= 0:
+        raise RuntimeError(f"Clip duration is non-positive ({float(end):.2f} - {s:.2f} = {dur:.2f}s). Check start/end times.")
     tmp = os.path.dirname(os.path.abspath(ass_path))
     ass = os.path.basename(ass_path)  # relative name avoids Windows 'C:' escaping problems
+    
+    # normalize layout aliases
+    if layout in ("dual", "stack"):
+        layout = "stack"
+    
+    # Hook zoom effect: subtle kinetic punch zoom over the first 3.2 seconds
+    zoom = f",scale=eval=frame:w='if(lte(t,3.2),{W}*(1.07-0.07*t/3.2),{W})':h='if(lte(t,3.2),{H}*(1.07-0.07*t/3.2),{H})',crop={W}:{H}" if hook_zoom else ""
+
     cam = (track or {}).get("cam") if layout in ("stack", "pip") else None
-    if layout == "pip" and cam and w / h > 9 / 16 + 0.01:
-        # gameplay fills the frame, facecam floats in a small box at the top centre
-        from .faces import PIP_SIZE, PIP_TOP
-        gw = int(h * 9 / 16) // 2 * 2
-        gx = int((w - gw) * min(max(crop_x, 0), 1)) // 2 * 2
-        cx, cy, cw_, ch_ = track.get("box") or cam
-        pw = int(W * PIP_SIZE) // 2 * 2
-        fc = (f"[0:v]split[a][b];[b]crop={gw}:{h}:{gx}:0,scale={W}:{H}:flags=lanczos[bg];"
-              f"[a]crop={cw_}:{ch_}:{cx}:{cy},scale={pw}:-2:flags=lanczos[pip];"
-              f"[bg][pip]overlay=(W-w)/2:{int(H * PIP_TOP)},setsar=1,ass={ass}[v]")
-    elif layout == "stack" and cam and w / h > 9 / 16 + 0.01:
-        # facecam on top, gameplay underneath: the standard gaming Shorts/Reels/TikTok layout
-        from .faces import TOP_SHARE
-        th = int(H * TOP_SHARE) // 2 * 2
-        bh = H - th
-        gw = min(w, int(h * W / bh)) // 2 * 2
-        gx = int((w - gw) * min(max(crop_x, 0), 1)) // 2 * 2
+    if layout == "pip" and not cam:   # no facecam found: float the streamer's corner of the screen (same as the preview)
+        fx, fy, fw, fh = CORNER_BOX.get(cam_corner) or CORNER_BOX["tr"]
+        cam = [int(w * fx) // 2 * 2, int(h * fy) // 2 * 2, int(w * fw) // 2 * 2, int(h * fh) // 2 * 2]
+    if cam:
         cx, cy, cw_, ch_ = cam
-        fc = (f"[0:v]split[a][b];[a]crop={cw_}:{ch_}:{cx}:{cy},scale={W}:{th}:flags=lanczos[top];"
-              f"[b]crop={gw}:{h}:{gx}:0,scale={W}:{bh}:flags=lanczos[bot];[top][bot]vstack,setsar=1,ass={ass}[v]")
-    elif layout in ("blur", "stack", "pip") or w / h <= 9 / 16 + 0.01:     # stack without a facecam: whole gameplay, blurred fill
+        cz = max(0.4, min(float(cam_zoom or 1.0), 3.0))
+        if cz != 1.0:
+            zw = int(cw_ / cz) // 2 * 2
+            zh = int(ch_ / cz) // 2 * 2
+            cx = max(0, min(cx + (cw_ - zw) // 2, w - zw)) // 2 * 2
+            cy = max(0, min(cy + (ch_ - zh) // 2, h - zh)) // 2 * 2
+            cw_, ch_ = zw, zh
+        cam = [cx, cy, cw_, ch_]
+
+    target_ratio = W / H
+    is_pip = layout == "pip"
+    if is_pip and cam and w / h > target_ratio + 0.01:
+        from .faces import PIP_SIZE, PIP_TOP
+        cx, cy, cw_, ch_ = cam
+        pw = int(min(W, H) * (PIP_SIZE if aspect == "9:16" else 0.38)) // 2 * 2
+        ph = int(pw * ch_ / cw_) // 2 * 2
+        
+        # Position calculation
+        if cam_pos == "pip_top":
+            ox, oy = "(W-w)/2", str(int(H * PIP_TOP))
+        elif cam_pos == "pip_bottom":
+            ox, oy = "(W-w)/2", str(int(H * 0.58))
+        elif cam_pos == "pip_center":
+            ox, oy = "(W-w)/2", "(H-h)/2"
+        else:
+            val_x = max(0.02, min(float(cam_pos_x or 0.5), 0.98))
+            val_y = max(0.02, min(float(cam_pos_y or 0.65), 0.98))
+            ox = f"(W-w)*{val_x:.3f}"
+            oy = f"(H-h)*{val_y:.3f}"
+
+        # Shape mask (circle / rectangle)
+        if cam_shape == "circle":
+            dim = min(pw, ph) // 2 * 2
+            shape_filter = f",scale={dim}:{dim}:flags=lanczos,format=yuva420p,geq=lum='p(X,Y)':a='if(lte(hypot(X-W/2,Y-H/2),min(W,H)/2-2),255,0)'"
+        else:
+            shape_filter = f",scale={pw}:{ph}:flags=lanczos"
+
+        # gameplay fills the whole vertical frame (zoom + pan like the other layouts), the cam floats on top
+        gw, gh, gx, gy = _game_crop(w, h, target_ratio, game_zoom, crop_x, crop_y)
+        fc = (f"[0:v]split[v_game][v_pip];"
+              f"[v_game]crop={gw}:{gh}:{gx}:{gy},scale={W}:{H}:flags=lanczos[base];"
+              f"[v_pip]crop={cw_}:{ch_}:{cx}:{cy}{shape_filter}[pip];"
+              f"[base][pip]overlay={ox}:{oy},setsar=1{zoom},ass={ass}[v]")
+    elif layout == "stack" and w / h > target_ratio + 0.01:
+        top_share = max(0.25, min(float(split_ratio or 0.5), 0.75))
+        th = int(H * top_share) // 2 * 2
+        bh = H - th
+
+        # Gameplay crop with game_zoom and crop_x, crop_y
+        gz = max(0.4, min(float(game_zoom or 1.0), 3.0))
+        bot_aspect = W / bh
+        if w / h > bot_aspect:
+            gh = max(32, min(h, int(h / gz))) // 2 * 2
+            gw = max(32, min(w, int(gh * bot_aspect))) // 2 * 2
+        else:
+            gw = max(32, min(w, int(w / gz))) // 2 * 2
+            gh = max(32, min(h, int(gw / bot_aspect))) // 2 * 2
+        px_g = max(0.0, min(1.0, float(crop_x if crop_x is not None else 0.5)))
+        py_g = max(0.0, min(1.0, float(crop_y if crop_y is not None else 0.5)))
+        gx = int(min(max((w - gw) * px_g, 0), w - gw)) // 2 * 2
+        gy = int(min(max((h - gh) * py_g, 0), h - gh)) // 2 * 2
+
+        # Streamer reaction crop with cam_zoom and cam_crop_x, cam_crop_y
+        if not cam:
+            corner = cam_corner or cam_pos or "bl"
+            if corner == "tl":
+                cx, cy, cw_, ch_ = 0, 0, int(w * 0.35), int(h * 0.50)
+            elif corner == "tr":
+                cx, cy, cw_, ch_ = int(w * 0.65), 0, int(w * 0.35), int(h * 0.50)
+            elif corner == "br":
+                cx, cy, cw_, ch_ = int(w * 0.65), int(h * 0.45), int(w * 0.35), int(h * 0.55)
+            elif corner == "tc":
+                cx, cy, cw_, ch_ = int(w * 0.325), 0, int(w * 0.35), int(h * 0.50)
+            elif corner == "bc":
+                cx, cy, cw_, ch_ = int(w * 0.325), int(h * 0.45), int(w * 0.35), int(h * 0.55)
+            else:  # "bl" default
+                cx, cy, cw_, ch_ = 0, int(h * 0.45), int(w * 0.35), int(h * 0.55)
+        else:
+            cx, cy, cw_, ch_ = cam
+
+        cz = max(0.4, min(float(cam_zoom or 1.0), 3.0))
+        top_aspect = W / th
+        if cw_ / ch_ > top_aspect:
+            sch = max(32, min(h, int(ch_ / cz))) // 2 * 2
+            scw = max(32, min(w, int(sch * top_aspect))) // 2 * 2
+        else:
+            scw = max(32, min(w, int(cw_ / cz))) // 2 * 2
+            sch = max(32, min(h, int(scw / top_aspect))) // 2 * 2
+
+        px_c = max(0.0, min(1.0, float(cam_crop_x if cam_crop_x is not None else 0.5)))
+        py_c = max(0.0, min(1.0, float(cam_crop_y if cam_crop_y is not None else 0.5)))
+        scx = int(min(max(cx + (cw_ - scw) * px_c, 0), w - scw)) // 2 * 2
+        scy = int(min(max(cy + (ch_ - sch) * py_c, 0), h - sch)) // 2 * 2
+
+        # Enhance upscaled webcam/streamer crop with unsharp filter for crisp facial detail
+        cam_filter = f"scale={W}:{th}:flags=lanczos,unsharp=5:5:0.7:5:5:0.0"
+
+        if cam_pos in ("bottom", "bl", "br", "bc"):
+            # Streamer on bottom, gameplay on top
+            fc = (f"[0:v]split[a][b];[b]crop={gw}:{gh}:{gx}:{gy},scale={W}:{bh}:flags=lanczos[top];"
+                  f"[a]crop={scw}:{sch}:{scx}:{scy},{cam_filter}[bot];"
+                  f"[top][bot]vstack,setsar=1{zoom},ass={ass}[v]")
+        else:
+            # Streamer on top (default), gameplay on bottom
+            fc = (f"[0:v]split[a][b];[a]crop={scw}:{sch}:{scx}:{scy},{cam_filter}[top];"
+                  f"[b]crop={gw}:{gh}:{gx}:{gy},scale={W}:{bh}:flags=lanczos[bot];"
+                  f"[top][bot]vstack,setsar=1{zoom},ass={ass}[v]")
+    elif layout in ("blur", "stack", "pip") or w / h <= target_ratio + 0.01:
         fc = (f"[0:v]split[a][b];[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
               f"boxblur=25:6[bg];[b]scale={W}:{H}:force_original_aspect_ratio=decrease:flags=lanczos[fg];"
-              f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,ass={ass}[v]")
+              f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1{zoom},ass={ass}[v]")
     elif layout == "follow" and track and track.get("pts"):
         from .faces import crop_width, write_sendcmd
-        cw = crop_width(h)
+        cw = min(w, int(h * target_ratio)) // 2 * 2
         cmd_name = os.path.splitext(ass)[0] + ".cmd"
         x0 = write_sendcmd(track["pts"], os.path.join(tmp, cmd_name))
-        fc = (f"[0:v]sendcmd=f={cmd_name},crop={cw}:{h}:{x0}:0,scale={W}:{H}:flags=lanczos,setsar=1,ass={ass}[v]")
+        fc = (f"[0:v]sendcmd=f={cmd_name},crop={cw}:{h}:{x0}:0,scale={W}:{H}:flags=lanczos,setsar=1{zoom},ass={ass}[v]")
     else:
-        cw = int(h * 9 / 16) // 2 * 2
-        x = int((w - cw) * min(max(crop_x, 0), 1)) // 2 * 2
-        fc = f"[0:v]crop={cw}:{h}:{x}:0,scale={W}:{H}:flags=lanczos,setsar=1,ass={ass}[v]"
+        cw, ch, x, y = _game_crop(w, h, target_ratio, game_zoom, crop_x, crop_y)
+        fc = f"[0:v]crop={cw}:{ch}:{x}:{y},scale={W}:{H}:flags=lanczos,setsar=1{zoom},ass={ass}[v]"
     af, extra_in = _audio_graph(music, music_vol, duck, sfx, 1, vo)
-    cmd = ([ffmpeg, "-y", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", os.path.abspath(src)] + extra_in +
+    cmd = ([ffmpeg, "-nostdin", "-y", "-ss", f"{s:.3f}", "-t", f"{dur:.3f}", "-i", os.path.abspath(src)] + extra_in +
            ["-filter_complex", fc + ";" + af, "-map", "[v]", "-map", "[aout]"] + ENC[encoder] +
            ["-r", str(fps), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
             "-t", f"{dur:.3f}", "-movflags", "+faststart", os.path.abspath(out_path)])

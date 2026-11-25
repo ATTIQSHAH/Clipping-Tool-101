@@ -94,7 +94,7 @@ def motion_score(ffmpeg, src, n_frames):
     """Big sudden picture changes (crashes, explosions, chaos). Decodes only keyframes at a tiny size, so even an
     8-hour VOD takes a few minutes. Returns 0-1 per analysis frame, or None if nothing could be read."""
     sw, sh = 64, 36
-    raw = subprocess.run([ffmpeg, "-v", "error", "-skip_frame", "nokey", "-i", src, "-an", "-vf",
+    raw = subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-skip_frame", "nokey", "-i", src, "-an", "-vf",
                           f"fps=1,scale={sw}:{sh},format=gray", "-f", "rawvideo", "-"], capture_output=True).stdout
     n = len(raw) // (sw * sh)
     if n < 10:
@@ -142,12 +142,17 @@ def combine(audio, heat, chat, motion=None, game=None):
 def pick_windows(score, n, min_gap, min_score, lead, tail, duration):
     """Greedy peak picking: best peaks first, at least min_gap seconds apart."""
     picks = []
+    max_t = max(0.0, float(duration) - 0.5)
     for i in np.argsort(-score):
         if score[i] < min_score or len(picks) >= n:
             break
         t = (i + 0.5) * FRAME
+        if t > max_t:
+            continue
         if all(abs(t - p["peak"]) >= min_gap for p in picks):
+            start = max(0.0, min(float(duration) - 2.0, t - lead))
+            end = min(float(duration), max(start + 2.0, t + tail))
             picks.append({"peak": t, "score": float(score[i]),
-                          "start": max(0.0, t - lead), "end": min(duration, t + tail)})
+                          "start": start, "end": end})
     picks.sort(key=lambda p: p["peak"])
     return picks

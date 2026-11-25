@@ -3,8 +3,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certi
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt .
-COPY requirements-extras.txt .
-RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir --no-deps -r requirements-extras.txt
+RUN pip install --no-cache-dir -r requirements.txt
 COPY clipforge ./clipforge
 COPY clipforge_web ./clipforge_web
 COPY audio_library ./audio_library

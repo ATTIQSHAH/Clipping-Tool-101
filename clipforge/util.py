@@ -2,6 +2,48 @@
 import json, os, shutil, subprocess, sys, tempfile, threading, time
 
 
+def silent_flags():
+    """Return creationflags and startupinfo for running child processes completely hidden on Windows."""
+    if os.name == "nt":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        return {
+            "creationflags": subprocess.CREATE_NO_WINDOW,
+            "startupinfo": si,
+            "stdin": subprocess.DEVNULL,
+        }
+    return {}
+
+
+# Universal hook on Windows to guarantee NO black console windows ever appear for any subprocess
+if os.name == "nt" and not getattr(subprocess, "_clipforge_silent_applied", False):
+    _RealPopen = subprocess.Popen
+
+    class _SilentPopen(_RealPopen):
+        def __init__(self, *args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args")
+            is_browser = False
+            if cmd and isinstance(cmd, (list, tuple)) and len(cmd) > 0:
+                c0 = str(cmd[0]).lower()
+                if "msedge" in c0 or "chrome" in c0:
+                    is_browser = True
+            if not is_browser:
+                kwargs["creationflags"] = (kwargs.get("creationflags") or 0) | subprocess.CREATE_NO_WINDOW
+                si = kwargs.get("startupinfo")
+                if si is None:
+                    si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = 0  # SW_HIDE
+                kwargs["startupinfo"] = si
+                if "stdin" not in kwargs or kwargs.get("stdin") is None:
+                    kwargs["stdin"] = subprocess.DEVNULL
+            super().__init__(*args, **kwargs)
+
+    subprocess.Popen = _SilentPopen
+    subprocess._clipforge_silent_applied = True
+
+
 class Cancelled(Exception):
     pass
 
@@ -26,7 +68,7 @@ def kill_tree(p):
     try:
         if os.name == "nt":
             subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **silent_flags())
         else:
             p.kill()
     except Exception:
@@ -58,6 +100,8 @@ class Job:
             self.cancel()
             raise Cancelled()
 
+    check_cancelled = check
+
     def _wait(self, p, cmd, err, reader=None):
         """Wait for a child process while honouring cancel; raise with the tail of stderr if it fails."""
         with self.lock:
@@ -85,14 +129,16 @@ class Job:
     def run(self, cmd, cwd=None, show=False):
         self.check()
         err = tempfile.TemporaryFile()
-        p = subprocess.Popen(cmd, cwd=cwd, stdout=None if (show and self.show_output) else subprocess.DEVNULL, stderr=err)
+        kwargs = silent_flags() if os.name == "nt" else {}
+        p = subprocess.Popen(cmd, cwd=cwd, stdout=None if (show and self.show_output) else subprocess.DEVNULL, stderr=err, **kwargs)
         return self._wait(p, cmd, err)
 
     def run_lines(self, cmd, on_line, cwd=None):
         """Like run(), but hands every output line to on_line() while the program runs (for progress bars)."""
         self.check()
         err = tempfile.TemporaryFile()
-        p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=err, text=True, bufsize=1, errors="replace")
+        kwargs = silent_flags() if os.name == "nt" else {}
+        p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=err, text=True, bufsize=1, errors="replace", **kwargs)
 
         def reader():
             for line in p.stdout:
@@ -106,10 +152,11 @@ class Job:
 
 
 def probe(ffprobe, path):
+    kwargs = silent_flags() if os.name == "nt" else {}
     r = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0",
                         "-show_entries", "stream=width,height,r_frame_rate",
                         "-show_entries", "format=duration", "-of", "json", path],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, **kwargs)
     try:
         d = json.loads(r.stdout)
         s = d["streams"][0]

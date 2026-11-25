@@ -153,3 +153,4 @@ def translate(api_key, lines, lang, post=_post):
     if not isinstance(out, list) or len(out) != len(lines):
         raise ValueError("the translation came back with the wrong number of lines")
     return [str(x).strip() or lines[i] for i, x in enumerate(out)]
+

@@ -1,6 +1,32 @@
 import os, shutil, subprocess, sys, threading, webbrowser
 import uvicorn
 
+# Suppress black console windows for all child processes (ffmpeg, yt-dlp, ffprobe) on Windows
+if os.name == "nt" and not getattr(subprocess, "_clipforge_silent_applied", False):
+    _RealPopen = subprocess.Popen
+
+    class _SilentPopen(_RealPopen):
+        def __init__(self, *args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args")
+            is_browser = False
+            if cmd and isinstance(cmd, (list, tuple)) and len(cmd) > 0:
+                c0 = str(cmd[0]).lower()
+                if "msedge" in c0 or "chrome" in c0:
+                    is_browser = True
+            if not is_browser:
+                kwargs["creationflags"] = (kwargs.get("creationflags") or 0) | subprocess.CREATE_NO_WINDOW
+                si = kwargs.get("startupinfo")
+                if si is None:
+                    si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = 0
+                kwargs["startupinfo"] = si
+                if "stdin" not in kwargs or kwargs.get("stdin") is None:
+                    kwargs["stdin"] = subprocess.DEVNULL
+            super().__init__(*args, **kwargs)
+
+    subprocess.Popen = _SilentPopen
+    subprocess._clipforge_silent_applied = True
 
 def open_window(url):
     """Open ClipForge in its own app-style window (no browser tabs) using Edge or Chrome; else the normal browser."""
@@ -28,7 +54,8 @@ def main():
                  "Set CLIPFORGE_PASSWORD first (or keep CLIPFORGE_HOST unset to stay on this computer only).")
     if host in ("127.0.0.1", "localhost"):
         threading.Timer(1.5, lambda: open_window(f"http://127.0.0.1:{port}")).start()
-    uvicorn.run("clipforge_web.server:app", host=host, port=port, log_level="warning")
+    from clipforge_web.server import app
+    uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
 if __name__ == "__main__":

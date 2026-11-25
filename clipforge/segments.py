@@ -1,12 +1,15 @@
 """Clip boundaries (snap to sentence starts/ends) and a simple speech score."""
 import math
 
-HOOK_WORDS = ["no way", "what the", "oh my", "crazy", "insane", "bro", "dude", "wait", "bruh", "omg",
-              "wtf", "nah", "stop", "scream", "never", "can't believe", "unbelievable", "let's go", "yo",
-              # GTA / gaming reactions
-              "wasted", "busted", "oh no", "get out", "the cops", "five stars", "5 stars", "glitch", "crashed",
-              "exploded", "what just happened", "are you serious", "no no no", "oh my god", "run run", "go go go",
-              "i'm dead", "we're dead", "clip that", "let him cook"]
+HOOK_WORDS = [
+    "no way", "what the", "oh my", "crazy", "insane", "bro", "dude", "wait", "bruh", "omg",
+    "wtf", "nah", "stop", "scream", "never", "can't believe", "unbelievable", "let's go", "yo",
+    # GTA / gaming reactions & slang
+    "wasted", "busted", "oh no", "get out", "the cops", "five stars", "5 stars", "glitch", "crashed",
+    "exploded", "what just happened", "are you serious", "no no no", "oh my god", "run run", "go go go",
+    "i'm dead", "we're dead", "clip that", "let him cook",
+    "chat is this real", "watch this", "clutch", "he has no idea", "aimbot", "headshot", "hacker", "rage quit", "lock in", "on god", "ggs"
+]
 SENT = (".", "?", "!")
 
 
@@ -44,10 +47,15 @@ def snap(words, t0, t1, min_len, max_len, duration, fps):
             s, e = min(s, t0), max(e, t1, s + min_len)
     else:
         s, e = t0, t1
-    s, e = max(0.0, s), min(duration, e)
+    s = max(0.0, min(float(duration) - 1.0, float(s)))
+    e = min(float(duration), max(s + 1.0, float(e)))
     s = math.floor(s * fps) / fps                           # land on the frame grid
     e = math.ceil(e * fps) / fps
-    return s, min(e, duration)
+    if e <= s:
+        e = min(float(duration), s + max(1.0, 1.0 / fps))
+        if e <= s:
+            s = max(0.0, e - 1.0)
+    return s, e
 
 
 def title_of(words, n=70):
@@ -75,5 +83,3 @@ def text_score(words, dur):
     s += 0.2 if "?" in first else 0.0
     s += min(len(words) / max(dur, 1) / 3.0, 1.0) * 0.3
     return min(s, 1.0)
-
-

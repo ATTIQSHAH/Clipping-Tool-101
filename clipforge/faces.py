@@ -4,50 +4,75 @@ import subprocess
 
 import numpy as np
 
-_cascade = None
+from .util import silent_flags
+
+_cascades = None
 
 
-def _detector():
-    global _cascade
-    if _cascade is None:
-        import cv2
-        _cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        if _cascade.empty():
+def _detectors():
+    global _cascades
+    if _cascades is None:
+        import cv2, os
+        cascades = []
+        for name in ("haarcascade_frontalface_alt2.xml", "haarcascade_profileface.xml", "haarcascade_frontalface_default.xml"):
+            p = cv2.data.haarcascades + name
+            if os.path.exists(p):
+                c = cv2.CascadeClassifier(p)
+                if not c.empty():
+                    cascades.append(c)
+        if not cascades:
             raise RuntimeError("Face detector files are missing. Reinstall: pip install \"opencv-python-headless<5\"")
-    return _cascade
+        _cascades = cascades
+    return _cascades
+
+
+def detect_faces(gray, min_size=(16, 16)):
+    faces_found, seen = [], []
+    for casc in _detectors():
+        dets = casc.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=min_size)
+        for (x, y, w, h) in dets:
+            cx, cy = x + w / 2, y + h / 2
+            if not any(abs(cx - scx) < 0.45 * w and abs(cy - scy) < 0.45 * h for (scx, scy, _) in seen):
+                faces_found.append((x, y, w, h))
+                seen.append((cx, cy, w))
+    return faces_found
 
 
 def _even(v):
     return int(v) // 2 * 2
 
 
-def crop_width(h):
-    return _even(h * 9 / 16)
+def crop_width(h, target_ratio=9/16):
+    return _even(h * target_ratio)
 
 
 def _read_frames(ffmpeg, src, start, end, W, H, fps, sw=512):
+    s = max(0.0, float(start))
+    dur = max(0.5, float(end) - s)
     sh = _even(round(sw * H / W))
-    cmd = [ffmpeg, "-v", "error", "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", src,
+    cmd = [ffmpeg, "-nostdin", "-v", "error", "-ss", f"{s:.3f}", "-t", f"{dur:.3f}", "-i", src,
            "-vf", f"fps={fps},scale={sw}:{sh}", "-f", "rawvideo", "-pix_fmt", "gray", "-"]
-    raw = subprocess.run(cmd, capture_output=True).stdout
+    try:
+        raw = subprocess.run(cmd, capture_output=True, timeout=30, **silent_flags()).stdout
+    except Exception:
+        raw = b""
     n = len(raw) // (sw * sh)
     return np.frombuffer(raw[: n * sw * sh], dtype=np.uint8).reshape(n, sh, sw), sw / W
 
 
-def track(ffmpeg, src, W, H, start, end, fps=8, should_stop=None):
+def track(ffmpeg, src, W, H, start, end, fps=8, should_stop=None, target_ratio=9/16):
     """Returns {'pts': [[t, crop_left_px], ...], 'found': share_of_frames_with_a_face, 'cw': crop_width}.
     t is seconds from the clip start; crop_left_px is the left edge of the 9:16 window in source pixels."""
     import cv2
-    cw = crop_width(H)
+    cw = crop_width(H, target_ratio)
     frames, scale = _read_frames(ffmpeg, src, start, end, W, H, fps)
-    det = _detector()
-    min_face = max(20, int(frames.shape[2] * 0.03)) if len(frames) else 20
+    min_face = max(16, int(frames.shape[2] * 0.025)) if len(frames) else 16
     tracks, prev, target, last_switch = [], None, None, -99
     raw_targets, found = [], 0
     for i, g in enumerate(frames):
         if should_stop and i % 20 == 0:
             should_stop()
-        faces = det.detectMultiScale(g, scaleFactor=1.1, minNeighbors=5, minSize=(min_face, min_face))
+        faces = detect_faces(g, min_size=(min_face, min_face))
         dets = []
         for (x, y, w, h) in faces:
             motion = 0.0
@@ -160,23 +185,23 @@ def cam_rect(frames, cx, cy, fw):
     return x0 + 1, y0 + 1, x1 - 1, y1 - 1                 # 1px inside so no gameplay line leaks in
 
 
-def find_facecam(ffmpeg, src, W, H, start, end, out_w=1080, out_h=1920):
+def find_facecam(ffmpeg, src, W, H, start, end, out_w=1080, out_h=1920, top_share=0.5):
     """Gaming streams: find a fixed facecam overlay. Returns {'cam': [x, y, w, h] | None, 'box': ..., 'kind': ...}
     in source px. 'box' is the whole overlay (pip layout); 'cam' is the part of it that fits the stacked top panel.
     kind 'facecam' = small steady face (overlay), 'camera' = big face (talking head, use follow instead), 'none'."""
-    frames, scale = _read_frames(ffmpeg, src, start, end, W, H, fps=1, sw=1024)   # small facecams need the detail
-    det = _detector()
+    frames, scale = _read_frames(ffmpeg, src, start, end, W, H, fps=2, sw=512)
     groups, big = [], []                                  # each steady face: [(cx, cy, w), ...] in analysis px
     for g in frames:
         min_face = max(16, int(g.shape[1] * 0.025))
-        found = det.detectMultiScale(g, scaleFactor=1.1, minNeighbors=6, minSize=(min_face, min_face))
+        found = detect_faces(g, min_size=(min_face, min_face))
         if len(found):
             big.append(max(w for _, _, w, _ in found))
         for x, y, w, h in found:
             f = (x + w / 2, y + h / 2, w)
             grp = next((gr for gr in groups if abs(gr[0][0] - f[0]) < 0.6 * w and abs(gr[0][1] - f[1]) < 0.6 * w), None)
             grp.append(f) if grp else groups.append([f])
-    groups = sorted((gr for gr in groups if len(gr) >= max(2, 0.6 * len(frames))), key=len, reverse=True)   # real cams: 75-100%; game false hits: <45%
+    # Lower threshold to 0.20 of frames so active/moving streamers with head motion are detected
+    groups = sorted((gr for gr in groups if len(gr) >= max(2, 0.20 * len(frames))), key=len, reverse=True)
     pick, rect = None, None
     camera = len(big) >= max(2, 0.3 * len(frames)) and np.median(big) / scale > 0.22 * W   # talking head, may wander
     for gr in groups:                                     # a facecam sits in a still box; an IRL or game face doesn't
@@ -193,7 +218,11 @@ def find_facecam(ffmpeg, src, W, H, start, end, out_w=1080, out_h=1920):
         if rect:
             break
     if pick is None:
-        return {"cam": None, "box": None, "kind": "camera" if camera else "none"}
+        if camera:
+            return {"cam": None, "box": None, "kind": "camera"}
+        cw, ch = _even(W * 0.35), _even(H * 0.45)
+        x, y = 0, _even(H * 0.45)  # default to bottom-left (Speed/streamer standard)
+        return {"cam": [x, y, cw, ch], "box": [x, y, cw, ch], "kind": "facecam", "exact": False}
     fx, fy, ff = pick
     cx, cy, fw = fx / scale, fy / scale, ff / scale
     if rect:
@@ -202,13 +231,13 @@ def find_facecam(ffmpeg, src, W, H, start, end, out_w=1080, out_h=1920):
     else:                                                 # guess the overlay from the face size
         bw, bh = min(fw * 3.6, W * 0.5), min(fw * 2.2, H)
         bx, by = min(max(cx - bw / 2, 0), W - bw), min(max(cy - bh * 0.45, 0), H - bh)
-    return {"cam": fit_panel(bx, by, bw, bh, cx, cy, out_w, out_h),
+    return {"cam": fit_panel(bx, by, bw, bh, cx, cy, out_w, out_h, top_share=top_share),
             "box": [_even(bx), _even(by), _even(bw), _even(bh)], "kind": "facecam", "exact": bool(rect)}
 
 
-def fit_panel(bx, by, bw, bh, cx, cy, out_w=1080, out_h=1920):
+def fit_panel(bx, by, bw, bh, cx, cy, out_w=1080, out_h=1920, top_share=0.5):
     """The part of the overlay box (around the face at cx, cy) that fills the stacked layout's top panel."""
-    aspect = out_w / (out_h * TOP_SHARE)
+    aspect = out_w / max(1.0, out_h * (top_share or 0.5))
     cw, ch = (bh * aspect, bh) if bw / bh > aspect else (bw, bw / aspect)
     x = min(max(cx - cw / 2, bx), bx + bw - cw)
     y = min(max(cy - ch * 0.45, by), by + bh - ch)       # face a little above the panel centre
