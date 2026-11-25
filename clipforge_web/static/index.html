@@ -2251,18 +2251,13 @@ function drawStack(v,f,c){
   const zoom = Math.max(0.4, Math.min(3.0, c.cam_zoom || 1.0));
 
   if(isPip){
-    // 1. Blurred background filling the 9:16 phone
-    g.save();
-    g.filter = 'blur(16px) brightness(0.65)';
-    const bgScale = Math.max(W / vw, H / vh);
-    const bgW = vw * bgScale, bgH = vh * bgScale;
-    g.drawImage(v, (W - bgW) / 2, (H - bgH) / 2, bgW, bgH);
-    g.restore();
-
-    // 2. Crisp 16:9 gameplay centered
-    const gh = Math.round(W * vh / vw);
-    const gy = Math.round((H - gh) / 2);
-    g.drawImage(v, 0, 0, vw, vh, 0, gy, W, gh);
+    // 1-2. Gameplay fills the whole vertical frame, with zoom (wheel / slider) and pan (drag / Pan X-Y), like the render
+    const gz = Math.max(0.4, Math.min(3.0, c.game_zoom || 1.0)), ga = W / H;
+    let ggw, ggh;
+    if(vw / vh > ga){ ggh = Math.min(vh, vh / gz); ggw = Math.min(vw, ggh * ga); }
+    else { ggw = Math.min(vw, vw / gz); ggh = Math.min(vh, ggw / ga); }
+    const gpx = typeof c.crop_x === 'number' ? c.crop_x : 0.5, gpy = typeof c.crop_y === 'number' ? c.crop_y : 0.5;
+    g.drawImage(v, Math.max(0, (vw - ggw) * gpx), Math.max(0, (vh - ggh) * gpy), ggw, ggh, 0, 0, W, H);
 
     // 3. Floating Streamer Reaction Camera
     const pw = Math.round(W * (shape === 'circle' ? 0.44 : 0.48));

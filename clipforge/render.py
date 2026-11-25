@@ -44,6 +44,24 @@ def _audio_graph(music, music_vol, duck, sfx, first_input, vo=None):
     return ";".join(parts), inputs
 
 
+def _game_crop(w, h, ratio, game_zoom, crop_x, crop_y):
+    """Crop (cw, ch, x, y) of the source that fills a frame of this width/height ratio, zoomed and panned."""
+    gz = max(0.4, min(float(game_zoom or 1.0), 3.0))
+    if w / h > ratio:
+        ch = max(32, min(h, int(h / gz))) // 2 * 2
+        cw = max(32, min(w, int(ch * ratio))) // 2 * 2
+    else:
+        cw = max(32, min(w, int(w / gz))) // 2 * 2
+        ch = max(32, min(h, int(cw / ratio))) // 2 * 2
+    px = max(0.0, min(1.0, float(crop_x if crop_x is not None else 0.5)))
+    py = max(0.0, min(1.0, float(crop_y if crop_y is not None else 0.5)))
+    return cw, ch, int(min(max((w - cw) * px, 0), w - cw)) // 2 * 2, int(min(max((h - ch) * py, 0), h - ch)) // 2 * 2
+
+
+CORNER_BOX = {"tl": (0, 0, .35, .50), "tr": (.65, 0, .35, .50), "bl": (0, .45, .35, .55), "br": (.65, .45, .35, .55),
+              "tc": (.325, 0, .35, .50), "bc": (.325, .45, .35, .55)}
+
+
 def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="follow", crop_x=0.5,
                 encoder="libx264", fps=30, res=1080, music=None, music_vol=0.18, duck=True, sfx=(),
                 track=None, hook_zoom=True, on_progress=None,
@@ -77,6 +95,9 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
     zoom = f",scale=eval=frame:w='if(lte(t,3.2),{W}*(1.07-0.07*t/3.2),{W})':h='if(lte(t,3.2),{H}*(1.07-0.07*t/3.2),{H})',crop={W}:{H}" if hook_zoom else ""
 
     cam = (track or {}).get("cam") if layout in ("stack", "pip") else None
+    if layout == "pip" and not cam:   # no facecam found: float the streamer's corner of the screen (same as the preview)
+        fx, fy, fw, fh = CORNER_BOX.get(cam_corner) or CORNER_BOX["tr"]
+        cam = [int(w * fx) // 2 * 2, int(h * fy) // 2 * 2, int(w * fw) // 2 * 2, int(h * fh) // 2 * 2]
     if cam:
         cx, cy, cw_, ch_ = cam
         cz = max(0.4, min(float(cam_zoom or 1.0), 3.0))
@@ -116,11 +137,11 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         else:
             shape_filter = f",scale={pw}:{ph}:flags=lanczos"
 
-        fc = (f"[0:v]split=3[v_bg][v_game][v_pip];"
-              f"[v_bg]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=25:6[bg];"
-              f"[v_game]scale={W}:{H}:force_original_aspect_ratio=decrease:flags=lanczos[game];"
+        # gameplay fills the whole vertical frame (zoom + pan like the other layouts), the cam floats on top
+        gw, gh, gx, gy = _game_crop(w, h, target_ratio, game_zoom, crop_x, crop_y)
+        fc = (f"[0:v]split[v_game][v_pip];"
+              f"[v_game]crop={gw}:{gh}:{gx}:{gy},scale={W}:{H}:flags=lanczos[base];"
               f"[v_pip]crop={cw_}:{ch_}:{cx}:{cy}{shape_filter}[pip];"
-              f"[bg][game]overlay=(W-w)/2:(H-h)/2[base];"
               f"[base][pip]overlay={ox}:{oy},setsar=1{zoom},ass={ass}[v]")
     elif layout == "stack" and w / h > target_ratio + 0.01:
         top_share = max(0.25, min(float(split_ratio or 0.5), 0.75))
@@ -197,17 +218,7 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         x0 = write_sendcmd(track["pts"], os.path.join(tmp, cmd_name))
         fc = (f"[0:v]sendcmd=f={cmd_name},crop={cw}:{h}:{x0}:0,scale={W}:{H}:flags=lanczos,setsar=1{zoom},ass={ass}[v]")
     else:
-        gz = max(0.4, min(float(game_zoom or 1.0), 3.0))
-        if w / h > target_ratio:
-            ch = max(32, min(h, int(h / gz))) // 2 * 2
-            cw = max(32, min(w, int(ch * target_ratio))) // 2 * 2
-        else:
-            cw = max(32, min(w, int(w / gz))) // 2 * 2
-            ch = max(32, min(h, int(cw / target_ratio))) // 2 * 2
-        px_g = max(0.0, min(1.0, float(crop_x if crop_x is not None else 0.5)))
-        py_g = max(0.0, min(1.0, float(crop_y if crop_y is not None else 0.5)))
-        x = int(min(max((w - cw) * px_g, 0), w - cw)) // 2 * 2
-        y = int(min(max((h - ch) * py_g, 0), h - ch)) // 2 * 2
+        cw, ch, x, y = _game_crop(w, h, target_ratio, game_zoom, crop_x, crop_y)
         fc = f"[0:v]crop={cw}:{ch}:{x}:{y},scale={W}:{H}:flags=lanczos,setsar=1{zoom},ass={ass}[v]"
     af, extra_in = _audio_graph(music, music_vol, duck, sfx, 1, vo)
     cmd = ([ffmpeg, "-nostdin", "-y", "-ss", f"{s:.3f}", "-t", f"{dur:.3f}", "-i", os.path.abspath(src)] + extra_in +
