@@ -771,6 +771,11 @@ function buildEditor(){
               <button data-txt="BRO DID NOT JUST DO THAT 💀">BRO DID NOT 💀</button>
               <button data-txt="WATCH TILL THE VERY END ⚠️">WATCH TILL END ⚠️</button>
             </div>
+            <div class="row small" style="margin-top:8px;align-items:center;gap:8px">
+              <span id="bannerWhen" class="muted" style="flex:1"></span>
+              <button id="bannerWhole" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Show the text for the whole clip">Whole clip</button>
+            </div>
+            <p class="muted small" style="margin:4px 0 0">To show it for only part of the clip, drag the yellow Hook Card bar on the timeline, or drag its ends.</p>
           </div>
 
           <!-- Text Size Scaling -->
@@ -1047,8 +1052,8 @@ function buildEditor(){
 
         <!-- Track 2: Viral Hook Text Strip -->
         <div class="tl-hook-track" id="tlHookTrack">
-          <div class="tl-hook-strip" id="tlHookStrip" hidden>
-            <span id="tlHookText">🏷️ Viral Hook</span>
+          <div class="tl-hook-strip" id="tlHookStrip" hidden title="Drag to move the text in time. Drag the ends to change how long it shows.">
+            <i class="tl-bh" data-bh="s"></i><span id="tlHookText">🏷️ Viral Hook</span><i class="tl-bh" data-bh="e"></i>
           </div>
         </div>
 
@@ -1088,7 +1093,8 @@ function buildEditor(){
   v.addEventListener('play',()=>{$('#play').textContent='⏸';(function loop(){drawCaption();drawBanner();applyLayout();drawPh();sfxTick();if(!v.paused)requestAnimationFrame(loop)})()});
   v.addEventListener('pause',()=>{$('#play').textContent='▶'; onReady();});
 
-  markSeg();drawCues();updateApproveUI();updDur();drawTrim();trimEvents();drawBanner();initBannerDrag();initCanvasDrag();initTimelineTracks();initPcUpload();
+  markSeg();drawCues();updateApproveUI();updDur();drawTrim();trimEvents();drawBanner();initBannerDrag();initCanvasDrag();initTimelineTracks();initHookDrag();initPcUpload();
+  if($('#bannerWhole'))$('#bannerWhole').onclick=guard(async()=>{S.clip.banner_start=S.clip.banner_end=null;await save({banner_start:null,banner_end:null});drawTrim();drawBanner()});
 
   // Exit Studio
   $('#closeStudio').onclick=()=>{S.cid=null;S.clip=null;showEditor(false);drawCands();drawMap()};
@@ -1868,7 +1874,7 @@ function initTimelineTracks(){
   if(!wrap||!v)return;
 
   wrap.onpointerdown=e=>{
-    if(e.target.closest('[data-h]')||e.target.closest('.tl-sfx-chip')) return;
+    if(e.target.closest('[data-h]')||e.target.closest('.tl-sfx-chip')||e.target.closest('.tl-hook-strip')) return;
     const r=wrap.getBoundingClientRect();
     const pct=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
     const t=T.lo+(T.hi-T.lo)*pct;
@@ -1878,6 +1884,35 @@ function initTimelineTracks(){
   };
 }
 
+// When the hook text shows, on the video timeline (like sound effects). Stored null = the whole clip.
+function bannerSpan(){
+  const c=S.clip;let s=c.banner_start??c.start,e=c.banner_end??c.end;
+  s=Math.max(c.start,Math.min(s,c.end));e=Math.min(c.end,Math.max(e,s));
+  return e-s<0.3?[c.start,c.end]:[s,e];
+}
+function initHookDrag(){
+  const strip=$('#tlHookStrip'),trk=$('#tlHookTrack');if(!strip||!trk)return;
+  strip.onpointerdown=e=>{
+    if(!S.clip)return;
+    e.preventDefault();e.stopPropagation();strip.setPointerCapture(e.pointerId);
+    const r=trk.getBoundingClientRect(),at=x=>T.lo+(T.hi-T.lo)*Math.min(1,Math.max(0,(x-r.left)/r.width));
+    const c=S.clip,h=e.target.dataset.bh,[s0,e0]=bannerSpan(),t0=at(e.clientX),v=$('#pv');
+    let s=s0,en=e0,moved=false;
+    strip.onpointermove=m=>{
+      moved=true;const t=at(m.clientX);
+      if(h==='s')s=Math.max(c.start,Math.min(t,en-0.5));
+      else if(h==='e')en=Math.min(c.end,Math.max(t,s+0.5));
+      else{const d=Math.max(c.start-s0,Math.min(c.end-e0,t-t0));s=s0+d;en=e0+d}
+      c.banner_start=+s.toFixed(2);c.banner_end=+en.toFixed(2);
+      if(v)v.currentTime=h==='e'?en:s;
+      drawTrim();drawBanner();
+    };
+    strip.onpointerup=strip.onpointercancel=guard(async()=>{
+      strip.onpointermove=strip.onpointerup=strip.onpointercancel=null;
+      if(moved){await save({banner_start:c.banner_start,banner_end:c.banner_end});drawTrim();drawBanner()}
+    });
+  };
+}
 function drawBanner(){
   const box=$('#bannerBox'),c=S.clip,strip=$('#tlHookStrip'),txtNode=$('#tlHookText');
   if(!box||!c)return;
@@ -1900,6 +1935,9 @@ function drawBanner(){
   box.style.fontSize = fpx + 'px';
   box.style.fontFamily = bfont;
   box.innerHTML=`<div class="${cls}" style="font-size:${fpx}px!important;font-family:${bfont}!important"><span class="banner-drag-handle" title="Drag to move anywhere">⋮⋮</span><span>${esc(txt)}</span></div>`;
+  // only inside its time range; while paused outside it, a faint copy stays so you can still place and style it
+  const pv=$('#pv'),[bs,be]=bannerSpan(),now=pv?pv.currentTime:bs,inside=now>=bs-0.05&&now<=be+0.05;
+  box.style.opacity=inside?'':(pv&&!pv.paused?'0':'0.3');
   if(strip&&txtNode){
     strip.hidden=false;
     txtNode.textContent='🏷️ '+txt;
@@ -2004,7 +2042,12 @@ function drawTrim(s,e){
   
   // Hook strip track
   const hStrip=$('#tlHookStrip');
-  if(hStrip){hStrip.style.left=X(s)+'%';hStrip.style.width=Math.max(0,X(e)-X(s))+'%'}
+  if(hStrip){
+    let [bs,be]=bannerSpan();if(T.drag&&S.clip.banner_start==null&&S.clip.banner_end==null){bs=s;be=e}
+    hStrip.style.left=X(bs)+'%';hStrip.style.width=Math.max(0,X(be)-X(bs))+'%';
+    const w=$('#bannerWhen'),whole=S.clip.banner_start==null&&S.clip.banner_end==null;
+    if(w)w.textContent=whole?'Shows for the whole clip.':`Shows from ${(bs-S.clip.start).toFixed(1)}s to ${(be-S.clip.start).toFixed(1)}s of the clip.`;
+  }
 
   // Time ruler marks
   const ruler=$('#tlRuler');

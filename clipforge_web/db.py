@@ -87,6 +87,8 @@ MIGRATE = {
         ("views", "integer"),
         ("lang", "text default ''"),
         ("vo", "text default ''"),
+        ("banner_start", "real"),
+        ("banner_end", "real"),
     ],
 }
 

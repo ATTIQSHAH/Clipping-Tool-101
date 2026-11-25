@@ -18,7 +18,7 @@ CLIP_FIELDS = {
     "title", "template", "layout", "res", "crop_x", "crop_y", "music", "sfx_intro", "sfx_peak",
     "captions", "status", "words", "hook_zoom", "emojis", "censor", "sfx",
     "cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style",
-    "banner_x", "banner_y", "banner_size", "banner_font", "split_ratio", "cam_corner", "cam_crop_x", "cam_crop_y", "game_zoom", "aspect_ratio",
+    "banner_x", "banner_y", "banner_size", "banner_font", "banner_start", "banner_end", "split_ratio", "cam_corner", "cam_crop_x", "cam_crop_y", "game_zoom", "aspect_ratio",
     "views", "lang", "vo", "caption_size", "caption_font"
 }
 
@@ -461,6 +461,11 @@ def patch_clip(cid: int, body: dict = Body(...)):
             raise HTTPException(400, "Unknown language.")
         if k == "vo":
             val = str(val or "").strip()[:300]
+        if k in ("banner_start", "banner_end"):
+            try:
+                val = None if val in (None, "") else round(max(0.0, float(val)), 3)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Hook text times must be numbers.")
         if k == "caption_size":
             try:
                 val = max(0.4, min(3.0, float(val)))
@@ -471,7 +476,7 @@ def patch_clip(cid: int, body: dict = Body(...)):
         sets.append(f"{k}=?")
         if k in ("res", "captions", "hook_zoom", "emojis", "censor"):
             vals.append(int(val))
-        elif k == "views":
+        elif k in ("views", "banner_start", "banner_end"):
             vals.append(val)
         elif k in ("crop_x", "cam_zoom", "cam_pos_x", "cam_pos_y", "split_ratio", "cam_crop_x", "cam_crop_y", "banner_size", "banner_x", "banner_y", "game_zoom", "crop_y", "caption_size"):
             vals.append(float(val))

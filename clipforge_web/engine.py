@@ -622,6 +622,17 @@ def edit_cue(clip, first, last, text):
     return words
 
 
+def banner_times(c):
+    """When the hook text shows, on the clip timeline: (t0, t1), or (None, None) for the whole clip.
+    banner_start/banner_end are stored on the video timeline (like sound effects), so trimming never moves the text."""
+    bs, be, dur = c.get("banner_start"), c.get("banner_end"), c["end"] - c["start"]
+    if bs is None and be is None:
+        return None, None
+    t0 = max(0.0, (bs if bs is not None else c["start"]) - c["start"])
+    t1 = min(dur, (be if be is not None else c["end"]) - c["start"])
+    return (None, None) if t1 - t0 < 0.3 else (round(t0, 3), round(t1, 3))
+
+
 # ---------------- translated captions + voice-over ----------------
 def _lang_and_voice(job, c, cues, work):
     """Translate the captions (and voice-over line) when the clip has a language, then speak the voice-over.
@@ -843,6 +854,7 @@ def render(job, clip_id, p):
     banner_font = str(c.get("banner_font") or "Arial")
     caption_size = float(c.get("caption_size") if c.get("caption_size") is not None else 1.0)
     caption_font = str(c.get("caption_font") or "Arial")
+    banner_t0, banner_t1 = banner_times(c)
 
     res_base = int(c["res"] or 1080)
     aspect = str(c.get("aspect_ratio") or "9:16").strip()
@@ -860,7 +872,8 @@ def render(job, clip_id, p):
         f.write(captions.to_ass(cues, c["template"], width=W, height=H, censor=censor, emojis=emojis, hook_boost=True,
                                 banner_text=banner_text, banner_style=banner_style, banner_x=banner_x, banner_y=banner_y,
                                 banner_size=banner_size, banner_font=banner_font,
-                                caption_size=caption_size, caption_font=caption_font))
+                                caption_size=caption_size, caption_font=caption_font,
+                                banner_t0=banner_t0, banner_t1=banner_t1))
     out_dir = os.path.join(db.DATA, "exports")
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"clip_{clip_id}.mp4")

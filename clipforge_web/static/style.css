@@ -723,6 +723,13 @@ body.studio-open {
   text-overflow: ellipsis;
 }
 
+.tl-hook-strip { cursor: grab; touch-action: none; user-select: none; padding: 0 14px; }
+.tl-hook-strip:active { cursor: grabbing; }
+.tl-bh { position: absolute; top: 0; bottom: 0; width: 10px; cursor: ew-resize; background: #00000033; }
+.tl-bh[data-bh="s"] { left: 0; border-radius: 4px 0 0 4px; }
+.tl-bh[data-bh="e"] { right: 0; border-radius: 0 4px 4px 0; }
+.tl-bh:hover { background: #00000066; }
+
 .tl-subs-track {
   height: 28px;
   position: relative;

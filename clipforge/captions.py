@@ -143,7 +143,8 @@ def _esc(s):
 
 def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, emojis=True, hook_boost=True,
            banner_text="", banner_style="white_box", banner_x=0.5, banner_y=0.12,
-           banner_size=1.0, banner_font="Arial", caption_size=1.0, caption_font=None):
+           banner_size=1.0, banner_font="Arial", caption_size=1.0, caption_font=None, banner_t0=None, banner_t1=None):
+    """banner_t0/banner_t1: when the hook text shows, in seconds on the clip timeline (None = whole clip)."""
     t = TEMPLATES.get(template) or TEMPLATES["yellow_pop"]
     style_box = 3 if t["box"] else 1
     back = _bgr("#000000", 90 if t["box"] else 128)
@@ -192,7 +193,8 @@ def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, e
         clean_banner = _esc(banner_text).strip()
         bx = int(width * max(0.05, min(0.95, float(banner_x if banner_x is not None else 0.5))))
         by = int(height * max(0.05, min(0.95, float(banner_y if banner_y is not None else 0.12))))
-        lines.append(f"Dialogue: 1,0:00:00.00,9:59:59.00,Banner,,0,0,0,,{{\\an5\\pos({bx},{by})}}{clean_banner}")
+        b0, b1 = _ts(banner_t0 or 0.0), (_ts(banner_t1) if banner_t1 is not None else "9:59:59.00")
+        lines.append(f"Dialogue: 1,{b0},{b1},Banner,,0,0,0,,{{\\an5\\pos({bx},{by})}}{clean_banner}")
     for cue in cues:
         raw_words = cue["words"]
         processed_words = []
