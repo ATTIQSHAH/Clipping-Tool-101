@@ -8,3 +8,4 @@ dist/
 cookies.txt
 *.db
 *.log
+.venv/

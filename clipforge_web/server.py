@@ -3,7 +3,7 @@ import asyncio, hashlib, hmac, json, os, re, shutil, subprocess, threading, zipf
 from typing import Optional
 
 from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from clipforge import ai, audiolib, captions, source, voice
 from clipforge.captions import TEMPLATES
@@ -32,58 +32,126 @@ def _start():
     live.start_watcher()
 
 
-# ---------------- auth ----------------
+# ---------------- sign-in (one shared team password: CLIPFORGE_PASSWORD, or set in Settings) ----------------
 def _pw():
     return os.environ.get("CLIPFORGE_PASSWORD") or db.setting("password")
 
 
 def _token(pw):
-    return hmac.new(pw.encode(), b"clipforge-auth-v1", hashlib.sha256).hexdigest()
+    secret = (os.environ.get("CLIPFORGE_SECRET") or pw).encode()
+    return hmac.new(secret, b"clipforge-session", hashlib.sha256).hexdigest()
+
+
+LOCAL_HOSTS = ("127.0.0.1", "localhost")
 
 
 @app.middleware("http")
-async def auth_gate(req: Request, call_next):
-    pw = _pw()
-    if not pw:
-        return await call_next(req)
-    p = req.url.path
-    if p in ("/api/auth/status", "/api/auth/login") or p.startswith("/static/"):
-        return await call_next(req)
-    tok = req.cookies.get("cf_auth")
-    if tok and hmac.compare_digest(tok, _token(pw)):
-        return await call_next(req)
-    if p.startswith("/api/"):
-        return Response(status_code=401, content=json.dumps({"detail": "Sign in required."}),
-                        media_type="application/json")
-    return await call_next(req)
+async def auth_gate(request: Request, call_next):
+    pw, host = _pw(), request.headers.get("host", "")
+    # Without a password only this computer may talk to the app. Checking Host stops DNS-rebinding sites.
+    if not pw and host.rsplit(":", 1)[0] not in LOCAL_HOSTS:
+        return JSONResponse({"detail": "ClipForge only accepts requests from this computer."}, status_code=403)
+    # Stop other websites from sending forms or uploads here (a browser always sends Origin on cross-site POSTs).
+    origin = request.headers.get("origin")
+    if request.method not in ("GET", "HEAD", "OPTIONS") and origin and origin.split("://", 1)[-1] != host:
+        return JSONResponse({"detail": "Request from another website was blocked."}, status_code=403)
+    if pw and request.url.path not in ("/login", "/api/login", "/healthz"):
+        if not hmac.compare_digest(request.cookies.get("cf_session", ""), _token(pw)):
+            if request.url.path.startswith("/api/"):
+                return JSONResponse({"detail": "Please sign in again."}, status_code=401)
+            return RedirectResponse("/login")
+    resp = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache"            # after an update the browser picks up the new page
+    return resp
 
 
-@app.get("/api/auth/status")
-def auth_status(req: Request):
-    pw = _pw()
-    if not pw:
-        return {"required": False, "ok": True}
-    tok = req.cookies.get("cf_auth")
-    return {"required": True, "ok": bool(tok and hmac.compare_digest(tok, _token(pw)))}
+LOGIN_HTML = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>ClipForge</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#11141d;color:#e7eaf3;font:15px "Segoe UI",system-ui,sans-serif}
+form{width:min(340px,90vw);background:#1a1f2e;border:1px solid #303952;border-radius:14px;padding:26px}
+h1{font:700 22px Bahnschrift,"Segoe UI",sans-serif;margin:0 0 16px}h1 i{font-style:normal;color:#8c9bff}
+input,button{width:100%;font:inherit;border-radius:8px;padding:10px 11px;margin-top:10px;box-sizing:border-box}
+input{background:#11141d;border:1px solid #303952;color:inherit}button{background:#8c9bff;border:0;color:#10131c;font-weight:600;cursor:pointer}
+p{color:#ee7384;min-height:1.2em;margin:10px 0 0}</style>
+<form id=f><h1>Clip<i>Forge</i></h1><label for=pw>Team password</label><input id=pw type=password autofocus autocomplete=current-password>
+<button>Sign in</button><p id=e role=alert></p></form>
+<script>f.onsubmit=async ev=>{ev.preventDefault();const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw.value})});
+if(r.ok)location='/';else e.textContent='That password is not right.'}</script>"""
 
 
-@app.post("/api/auth/login")
-def auth_login(body: dict = Body(...)):
+@app.get("/login")
+def login_page():
+    return HTMLResponse(LOGIN_HTML)
+
+
+@app.post("/api/login")
+async def login(request: Request, body: dict = Body(...)):
     pw = _pw()
     if not pw:
         return {"ok": True}
-    if not hmac.compare_digest(body.get("password", ""), pw):
+    if not hmac.compare_digest(str(body.get("password", "")).encode(), pw.encode()):
+        await asyncio.sleep(1)
         raise HTTPException(401, "Wrong password.")
-    res = Response(content=json.dumps({"ok": True}), media_type="application/json")
-    res.set_cookie("cf_auth", _token(pw), httponly=True, samesite="lax", max_age=86400 * 30)
-    return res
+    resp = JSONResponse({"ok": True})
+    secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    resp.set_cookie("cf_session", _token(pw), httponly=True, samesite="lax", secure=secure, max_age=60 * 60 * 24 * 30)
+    return resp
 
 
-@app.post("/api/auth/logout")
-def auth_logout():
-    res = Response(content=json.dumps({"ok": True}), media_type="application/json")
-    res.delete_cookie("cf_auth")
-    return res
+@app.post("/api/logout")
+def logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("cf_session")
+    return resp
+
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
+
+
+@app.get("/api/me")
+def me():
+    return {"auth": bool(_pw())}
+
+
+@app.get("/api/health")
+def health():
+    """What this computer is missing, so the page can say so in plain words."""
+    def has(name):
+        try:
+            which(name)
+            return True
+        except Exception:
+            return False
+
+    def can(mod):
+        try:
+            __import__(mod)
+            return True
+        except Exception:
+            return False
+    faces = False
+    try:
+        from clipforge import faces as f
+        f._detectors()
+        faces = True
+    except Exception:
+        pass
+    return {"ffmpeg": has("ffmpeg") and has("ffprobe"), "yt_dlp": has("yt-dlp"), "whisper": can("faster_whisper"),
+            "faces": faces, "streamlink": has("streamlink")}
+
+
+@app.post("/api/settings/test")
+def test_ai():
+    key = engine.ai_key()
+    if not key:
+        raise HTTPException(400, "Add an API key first.")
+    try:
+        ok = ai.test_key(key)
+    except Exception as e:
+        raise HTTPException(400, f"The key didn't work: {str(e)[:120]}")
+    return {"ok": ok}
 
 
 # ---------------- helpers ----------------
@@ -231,6 +299,20 @@ def add_link(body: dict = Body(...)):
                                        "then_analyze": _then(body)})
         ids.append(vid)
     return {"ids": ids}
+
+
+@app.post("/api/videos/{vid}/chat")
+async def chat_log(vid: int, file: UploadFile = File(...)):
+    """A saved chat log (one message per line, starting with a time) makes chat bursts count when finding clips."""
+    _video(vid)
+    text = (await file.read()).decode("utf-8", errors="ignore")
+    n = len(engine.parse_chat_events(text))
+    if n < 5:
+        raise HTTPException(400, "Couldn't find chat timestamps. Use one line per message, starting with a time like [0:12:34] or 754.5.")
+    os.makedirs(engine.wdir(vid), exist_ok=True)
+    with open(os.path.join(engine.wdir(vid), "chat.txt"), "w", encoding="utf-8") as f:
+        f.write(text)
+    return {"messages": n}
 
 
 @app.post("/api/videos/{vid}/analyze")
@@ -687,67 +769,52 @@ def cover(cid: int):
 
 
 # ---------------- live ----------------
-@app.get("/api/live/channels")
-def live_channels():
-    return live.list_channels()
-
-
-@app.post("/api/live/channels")
-def add_live_channel(body: dict = Body(...)):
-    url = body.get("url")
-    if not url:
-        raise HTTPException(400, "Provide a channel or stream URL.")
-    return live.add_channel(url)
-
-
-@app.delete("/api/live/channels/{cid}")
-def delete_live_channel(cid: int):
-    live.delete_channel(cid)
-    return {"ok": True}
-
-
-@app.post("/api/live/channels/{cid}/toggle")
-def toggle_live_channel(cid: int):
-    return live.toggle_channel(cid)
-
-
-@app.post("/api/live/start")
+@app.post("/api/live")
 def live_start(body: dict = Body(...)):
-    url = body.get("url")
-    if not url:
-        raise HTTPException(400, "Provide a live stream URL.")
     try:
-        vid = live.start_session(url, client_id=body.get("client_id"), auto_clip=bool(body.get("auto_clip", True)),
-                                 whisper_model=body.get("whisper_model", "base"))
-    except ValueError as e:
+        vid = live.start(str(body.get("url", "")).strip(), body.get("client_id"))
+    except (ValueError, RuntimeError) as e:
         raise HTTPException(400, str(e))
     return {"id": vid}
 
 
-@app.get("/api/live/{vid}/status")
-def live_status(vid: int):
-    s = live.session(vid)
-    if not s:
-        raise HTTPException(404, "Live session isn't running.")
-    return s.stats()
-
-
 @app.post("/api/live/{vid}/clip")
-def live_manual_clip(vid: int):
-    s = live.session(vid)
-    if not s:
-        raise HTTPException(404, "Live session isn't running.")
+def live_clip(vid: int):
+    s = live.get(vid)
+    if not s or s.state != "recording":
+        raise HTTPException(409, "This stream isn't recording right now.")
     s.clip_now()
     return {"ok": True}
 
 
 @app.post("/api/live/{vid}/stop")
 def live_stop(vid: int):
-    s = live.session(vid)
-    if not s:
-        raise HTTPException(404, "Live session isn't running.")
-    s.stop()
+    live.stop(vid)
     return {"ok": True}
+
+
+@app.get("/api/live/{vid}/stats")
+def live_stats(vid: int):
+    s = live.get(vid)
+    if not s:
+        raise HTTPException(404, "Not a live session.")
+    return s.stats()
+
+
+@app.get("/api/watch")
+def watch_get():
+    return {"urls": live.watch_list(), "status": {u: live.WATCH.get(u, "Checking soon") for u in live.watch_list()},
+            "max": live.MAX_LIVE, "every": live.WATCH_EVERY}
+
+
+@app.post("/api/watch")
+def watch_set(body: dict = Body(...)):
+    try:
+        live.set_watch_list(body.get("urls", ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    threading.Thread(target=live.check_watch_list, daemon=True).start()   # check now, not in a minute
+    return watch_get()
 
 
 # ---------------- clients ----------------
@@ -796,6 +863,22 @@ def sfx_file(name: str):
     if not p:
         raise HTTPException(404, "No such sound effect.")
     return FileResponse(p)
+
+
+@app.post("/api/audio/upload")
+async def audio_upload(kind: str = "sfx", file: UploadFile = File(...)):
+    """Add your own music or sound effect to the library."""
+    if kind not in ("music", "sfx"):
+        raise HTTPException(400, "Kind must be music or sfx.")
+    name = re.sub(r"[^\w.\- ]", "_", os.path.basename(file.filename or "")).strip(" .")
+    if not name.lower().endswith(audiolib.EXT):
+        raise HTTPException(400, "Use an MP3, WAV, M4A, AAC, OGG or FLAC file.")
+    data = await file.read(50 * 1024 * 1024 + 1)
+    if len(data) > 50 * 1024 * 1024:
+        raise HTTPException(400, "Audio files can be at most 50 MB.")
+    with open(os.path.join(audiolib.folder(kind), name), "wb") as f:
+        f.write(data)
+    return {"filename": name}
 
 
 @app.get("/api/audio")
