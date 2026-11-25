@@ -119,6 +119,18 @@ def build_cues(words, max_words=3, max_chars=22, gap=0.35):
     return cues
 
 
+def respread(cue, text):
+    """The same cue with new text (a translation): words spread over the cue's time by their length."""
+    toks = text.split() or ["…"]
+    t0, t1 = cue["start"], cue["end"]
+    total, cur, words = sum(len(t) + 1 for t in toks), t0, []
+    for t in toks:
+        d = (t1 - t0) * (len(t) + 1) / total
+        words.append({"w": t, "start": round(cur, 3), "end": round(cur + d, 3)})
+        cur += d
+    return {"start": t0, "end": t1, "words": words}
+
+
 def _ts(t):
     t = max(0.0, t)
     cs = int(round(t * 100))
@@ -131,7 +143,7 @@ def _esc(s):
 
 def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, emojis=True, hook_boost=True,
            banner_text="", banner_style="white_box", banner_x=0.5, banner_y=0.12,
-           banner_size=1.0, banner_font="Arial"):
+           banner_size=1.0, banner_font="Arial", caption_size=1.0, caption_font=None):
     t = TEMPLATES.get(template) or TEMPLATES["yellow_pop"]
     style_box = 3 if t["box"] else 1
     back = _bgr("#000000", 90 if t["box"] else 128)
@@ -139,7 +151,8 @@ def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, e
 
     # Scale font size, margins, and outline with export resolution / aspect ratio
     scale = float(height) / 1920.0
-    fsize = max(24, int(round(t["size"] * scale)))
+    cfont = caption_font if caption_font else t["font"]
+    fsize = max(24, int(round(t["size"] * float(caption_size or 1.0) * scale)))
     mv = max(28, int(round(t["mv"] * scale)))
     ow = max(2, int(round(t["ow"] * scale)))
     sh = max(1, int(round(t["shadow"] * scale)))
@@ -167,7 +180,7 @@ def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, e
         "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,"
         "Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,"
         "MarginR,MarginV,Encoding\n"
-        f"Style: Main,{t['font']},{fsize},{_bgr(t['primary'])},{_bgr(t['primary'])},{outc},{back},"
+        f"Style: Main,{cfont},{fsize},{_bgr(t['primary'])},{_bgr(t['primary'])},{outc},{back},"
         f"{-1 if t['bold'] else 0},0,0,0,100,100,0,0,{style_box},{ow},{sh},2,60,60,{mv},1\n"
         + (banner_def if banner_text and banner_style != "none" else "") +
         "\n[Events]\nFormat: Layer,Start,End,Name,Style,MarginL,MarginR,MarginV,Effect,Text\n"

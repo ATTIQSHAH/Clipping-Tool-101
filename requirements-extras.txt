@@ -1,0 +1,15 @@
+# Optional extras:
+# - reads GTA banners (WASTED, BUSTED, MISSION PASSED...) from the screen to find big moments
+# - voice-over: a computer voice reads a line at the start of a clip (offline; each voice downloads once)
+# Install with --no-deps so it does not pull full opencv-python over opencv-python-headless:
+#   pip install --no-deps -r requirements-extras.txt
+rapidocr-onnxruntime==1.4.4
+onnxruntime
+pyclipper
+shapely
+six
+Pillow
+PyYAML
+tqdm
+piper-tts==1.8.0
+pathvalidate

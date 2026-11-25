@@ -77,6 +77,8 @@
       <select id="s_model"><option value="base">Fast (base)</option><option value="small">Better (small)</option><option value="medium">Best, slow (medium)</option></select></div>
     <div><label for="s_key">AI scoring key (optional)</label><input id="s_key" type="password" placeholder="Anthropic API key" autocomplete="off">
       <p class="muted small" style="margin:6px 0 0">With a key, an AI editor also reads each clip's transcript to judge humor, surprise and whether the clip is complete. The transcripts are sent to Anthropic. Without a key the built-in scoring is used.</p></div>
+    <div><label for="s_chan">Learn from your channel</label><div class="row"><input id="s_chan" placeholder="https://www.youtube.com/@yourchannel"><button id="s_fetch" class="fit" type="button">Get views</button></div>
+      <p id="s_learn" class="muted small" style="margin:6px 0 0"></p></div>
     <div><label for="s_browser">Age-restricted / YouTube Cookies</label>
       <div class="row" style="gap:8px;align-items:center">
         <select id="s_browser" style="flex:1">
@@ -781,8 +783,8 @@ function buildEditor(){
                 <button id="bannerSizeUp" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Make text bigger">🔍+</button>
               </div>
             </div>
-            <input id="bannerSize" type="range" min="0.5" max="2.2" step="0.05" value="${c.banner_size || 1.0}">
-            <div class="row muted small"><span>0.5x Small</span><span style="flex:1;text-align:center">1.0x Normal</span><span>2.2x Huge</span></div>
+            <input id="bannerSize" type="range" min="0.5" max="3.0" step="0.05" value="${c.banner_size || 1.0}">
+            <div class="row muted small"><span>0.5x Small</span><span style="flex:1;text-align:center">1.0x Normal</span><span>3.0x Huge</span></div>
           </div>
 
           <!-- Font Design -->
@@ -834,6 +836,56 @@ function buildEditor(){
               <label style="margin:0" class="fit"><input type="checkbox" id="censor" ${c.censor?'checked':''}> 🤬 Censor swear words</label>
             </div>
           </div>
+
+          <!-- Subtitle Font Size Scaling -->
+          <div style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px;margin-top:8px">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0;font-weight:700">Subtitle Size: <b id="capSizeVal" style="color:var(--accent)">${Math.round((c.caption_size || 1.0) * 100)}%</b></label>
+              <div class="row fit" style="gap:4px">
+                <button id="capSizeDown" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Make subtitle smaller">🔍−</button>
+                <button id="capSizeReset" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Reset subtitle size">1.0x</button>
+                <button id="capSizeUp" class="ghost fit" style="padding:2px 8px;font-size:12px" title="Make subtitle larger">🔍+</button>
+              </div>
+            </div>
+            <input id="capSize" type="range" min="0.5" max="3.0" step="0.05" value="${c.caption_size || 1.0}">
+            <div class="row muted small"><span>0.5x Small</span><span style="flex:1;text-align:center">1.0x Normal</span><span>3.0x Huge</span></div>
+          </div>
+
+          <!-- Subtitle Font Style -->
+          <div style="margin-top:8px">
+            <label>Subtitle Font Design</label>
+            <div class="seg" id="capFont">
+              <button data-cf="Arial" class="${(!c.caption_font || c.caption_font==='Arial')?'on':''}">Arial</button>
+              <button data-cf="Impact" class="${c.caption_font==='Impact'?'on':''}" style="font-family:Impact,sans-serif">IMPACT</button>
+              <button data-cf="Montserrat" class="${c.caption_font==='Montserrat'?'on':''}" style="font-family:Montserrat,sans-serif;font-weight:800">Montserrat</button>
+              <button data-cf="Arial Black" class="${c.caption_font==='Arial Black'?'on':''}" style="font-family:'Arial Black',sans-serif">Black</button>
+              <button data-cf="Comic Sans MS" class="${c.caption_font==='Comic Sans MS'?'on':''}" style="font-family:'Comic Sans MS',sans-serif">Comic</button>
+            </div>
+          </div>
+
+          <!-- Translation & Voice-over -->
+          <div style="margin-top:8px">
+            <label for="lang">Translate Captions</label>
+            <select id="lang">
+              <option value="">As spoken</option>
+              ${Object.entries(S.settings.langs||{}).map(([k,n])=>`<option value="${k}" ${c.lang===k?'selected':''}>${esc(n)}</option>`).join('')}
+            </select>
+            <p class="muted small" style="margin:4px 0 0">${S.settings.ai?'Translated by the AI editor when exported. Preview shows spoken words.':'Needs an AI key in Settings.'}</p>
+          </div>
+          <div style="margin-top:8px">
+            <label for="vo">Voice-over (Read aloud at the start)</label>
+            <div class="row">
+              <input id="vo" value="${esc(c.vo||'')}" placeholder="Bro got WASTED in 2 seconds">
+              <button id="voTitle" class="fit">Use title</button>
+            </div>
+            <p class="muted small" style="margin:4px 0 0">${S.settings.voice?'A computer voice reads it in the caption language.':'Install requirements-extras.txt for voice-over.'}</p>
+          </div>
+          <div style="margin-top:8px">
+            <label for="views">Views after posting</label>
+            <input id="views" type="number" min="0" value="${c.views??''}" placeholder="Type views count, or get them in Settings">
+            <p class="muted small" style="margin:4px 0 0">ClipForge learns from your best clips and ranks new ones like them.</p>
+          </div>
+
           <hr>
           <h3 style="margin:4px 0">Word-by-word Subtitles</h3>
           <p class="muted small" style="margin:2px 0 6px">Click any word to jump to that moment.</p>
@@ -948,17 +1000,22 @@ function buildEditor(){
           <button id="tlViewFull" style="padding:2px 8px;font-size:11px">🌐 Whole Video</button>
         </div>
         <div class="row fit" style="gap:2px">
-          <button id="extStartMinus" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Extend clip 5s earlier">⏪ −5s</button>
-          <button id="stNow" title="Set In-Point to Playhead" style="padding:2px 7px;font-size:11px">[ In</button>
-          <button id="enNow" title="Set Out-Point to Playhead" style="padding:2px 7px;font-size:11px">Out ]</button>
-          <button id="extEndPlus" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Extend clip 5s longer">+5s ⏩</button>
+          <button id="trimStartMinus" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Start 1s earlier">◀ −1s</button>
+          <button id="stNow" class="primary fit" title="Set Start / In-Point to Playhead" style="padding:2px 7px;font-size:11px;font-weight:700">[ Set In</button>
+          <button id="cutSplitBtn" class="fit" style="background:#ef4444;color:#fff;border:none;padding:2px 8px;font-size:11px;font-weight:700;cursor:pointer;border-radius:4px" title="Cut clip at current playhead">✂️ Cut Here</button>
+          <button id="enNow" class="primary fit" title="Set End / Out-Point to Playhead" style="padding:2px 7px;font-size:11px;font-weight:700">Set Out ]</button>
+          <button id="trimEndPlus" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Extend end 1s longer">+1s ▶</button>
         </div>
         <div class="row fit" style="gap:4px;align-items:center;background:#0f172a;padding:2px 6px;border-radius:6px;border:1px solid #334155;font-size:11px">
           <span>In:</span>
-          <input id="inStartSec" style="width:48px;background:#1e293b;border:1px solid #475569;border-radius:4px;color:#fff;text-align:center;padding:1px 2px;font-size:11px" title="Clip start in seconds">
+          <input id="inStartSec" style="width:46px;background:#1e293b;border:1px solid #475569;border-radius:4px;color:#fff;text-align:center;padding:1px 2px;font-size:11px" title="Clip start in seconds">
           <span>Out:</span>
-          <input id="inEndSec" style="width:48px;background:#1e293b;border:1px solid #475569;border-radius:4px;color:#fff;text-align:center;padding:1px 2px;font-size:11px" title="Clip end in seconds">
-          <span id="clipLenBadge" style="color:#4ade80;font-weight:700">0.0s</span>
+          <input id="inEndSec" style="width:46px;background:#1e293b;border:1px solid #475569;border-radius:4px;color:#fff;text-align:center;padding:1px 2px;font-size:11px" title="Clip end in seconds">
+          <span style="margin-left:2px;font-weight:700;color:#94a3b8">Len:</span>
+          <input id="inLenSec" style="width:46px;background:#1e293b;border:1px solid #4ade80;border-radius:4px;color:#4ade80;font-weight:700;text-align:center;padding:1px 2px;font-size:11px" title="Clip length in seconds (change to adjust length)">
+          <button id="lenMinus5" class="ghost fit" style="padding:1px 4px;font-size:10px" title="Shorten length by 5s">−5s</button>
+          <button id="lenPlus5" class="ghost fit" style="padding:1px 4px;font-size:10px" title="Extend length by 5s">+5s</button>
+          <span id="clipLenBadge" style="color:#4ade80;font-weight:700;display:none">0.0s</span>
         </div>
         <button id="sfxAddPlayhead" class="primary" style="padding:2px 8px;font-size:11px" title="Add selected SFX at playhead">➕ Add SFX</button>
       </div>
@@ -1294,6 +1351,45 @@ function buildEditor(){
     });
   }
 
+  // Subtitle Font & Size
+  const cszInp=$('#capSize'), cszVal=$('#capSizeVal');
+  const updateCaptionSize = async val => {
+    val = Math.round(Math.max(0.4, Math.min(3.0, val)) * 100) / 100;
+    S.clip.caption_size = val;
+    if(cszInp) cszInp.value = val;
+    if(cszVal) cszVal.textContent = Math.round(val * 100) + '%';
+    drawCaption();
+    await save({caption_size: val});
+  };
+  if(cszInp){
+    cszInp.oninput=e=>{
+      S.clip.caption_size = +e.target.value;
+      if(cszVal) cszVal.textContent = Math.round(S.clip.caption_size * 100) + '%';
+      drawCaption();
+    };
+    cszInp.onchange=guard(e=>updateCaptionSize(+e.target.value));
+  }
+  if($('#capSizeDown')) $('#capSizeDown').onclick=guard(()=>updateCaptionSize((S.clip.caption_size||1.0)-0.1));
+  if($('#capSizeUp')) $('#capSizeUp').onclick=guard(()=>updateCaptionSize((S.clip.caption_size||1.0)+0.1));
+  if($('#capSizeReset')) $('#capSizeReset').onclick=guard(()=>updateCaptionSize(1.0));
+  if($('#capFont')){
+    $('#capFont').onclick=guard(async e=>{
+      const b=e.target.closest('[data-cf]');if(!b)return;
+      const cf=b.dataset.cf;
+      $('#capFont').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+      S.clip.caption_font=cf;
+      drawCaption();
+      await save({caption_font: cf});
+      toast('Subtitle font changed to '+cf);
+    });
+  }
+
+  // Translation, Voice-over & Views
+  if($('#lang')) $('#lang').onchange=guard(e=>save({lang:e.target.value}));
+  if($('#vo')) $('#vo').onchange=guard(e=>save({vo:e.target.value}));
+  if($('#voTitle')) $('#voTitle').onclick=guard(async()=>{$('#vo').value=S.clip.title;await save({vo:S.clip.title});toast('Title copied to voice-over.')});
+  if($('#views')) $('#views').onchange=guard(e=>save({views:e.target.value}));
+
   // Subtitle Download
   if($('#dlSrtBtn')){
     $('#dlSrtBtn').onclick=guard(async ()=>{
@@ -1307,7 +1403,7 @@ function buildEditor(){
     });
   }
 
-  // Timeline Navigation & Lengthen Controls
+  // Timeline Navigation & Lengthen / Cut Controls
   if($('#tlViewClip')) $('#tlViewClip').onclick=()=>{
     T.view='clip';
     $('#tlViewClip').classList.add('on');
@@ -1320,6 +1416,17 @@ function buildEditor(){
     if($('#tlViewClip')) $('#tlViewClip').classList.remove('on');
     drawTrim();
   };
+  if($('#trimStartMinus')) $('#trimStartMinus').onclick=guard(async ()=>{
+    const ns=Math.max(0, S.clip.start - 1.0);
+    await setTimes(+ns.toFixed(2), +S.clip.end.toFixed(2));
+    toast('Clip start trimmed 1s earlier.');
+  });
+  if($('#trimEndPlus')) $('#trimEndPlus').onclick=guard(async ()=>{
+    const dur=(S.video&&S.video.duration)||86400;
+    const ne=Math.min(dur, S.clip.end + 1.0);
+    await setTimes(+S.clip.start.toFixed(2), +ne.toFixed(2));
+    toast('Clip end trimmed 1s longer.');
+  });
   if($('#extStartMinus')) $('#extStartMinus').onclick=guard(async ()=>{
     const ns=Math.max(0, S.clip.start - 5.0);
     await setTimes(+ns.toFixed(2), +S.clip.end.toFixed(2));
@@ -1330,6 +1437,29 @@ function buildEditor(){
     const ne=Math.min(dur, S.clip.end + 5.0);
     await setTimes(+S.clip.start.toFixed(2), +ne.toFixed(2));
     toast('Clip extended 5s longer.');
+  });
+  if($('#cutSplitBtn')) $('#cutSplitBtn').onclick=guard(async ()=>{
+    const cur = v.currentTime;
+    if(cur > S.clip.start + 0.5 && cur < S.clip.end - 0.5){
+      await setTimes(+S.clip.start.toFixed(2), +cur.toFixed(2));
+      toast('Cut clip at playhead (' + cur.toFixed(1) + 's)');
+    } else {
+      toast('Move playhead inside the clip to cut.');
+    }
+  });
+  if($('#stNow')) $('#stNow').onclick=guard(async ()=>{
+    const cur = v.currentTime;
+    if(cur < S.clip.end - 0.5){
+      await setTimes(+cur.toFixed(2), +S.clip.end.toFixed(2));
+      toast('In-point set to ' + cur.toFixed(1) + 's');
+    }
+  });
+  if($('#enNow')) $('#enNow').onclick=guard(async ()=>{
+    const cur = v.currentTime;
+    if(cur > S.clip.start + 0.5){
+      await setTimes(+S.clip.start.toFixed(2), +cur.toFixed(2));
+      toast('Out-point set to ' + cur.toFixed(1) + 's');
+    }
   });
   if($('#inStartSec')){
     $('#inStartSec').onchange=guard(async e=>{
@@ -1348,6 +1478,29 @@ function buildEditor(){
       await setTimes(+S.clip.start.toFixed(2), +ne.toFixed(2));
     });
   }
+  if($('#inLenSec')){
+    $('#inLenSec').onchange=guard(async e=>{
+      let nlen=parseFloat(e.target.value);
+      if(isNaN(nlen)||nlen<1.0) return;
+      const dur=(S.video&&S.video.duration)||86400;
+      const ne=Math.min(dur, S.clip.start + nlen);
+      await setTimes(+S.clip.start.toFixed(2), +ne.toFixed(2));
+      toast('Length adjusted to ' + (ne - S.clip.start).toFixed(1) + 's');
+    });
+  }
+  if($('#lenMinus5')) $('#lenMinus5').onclick=guard(async ()=>{
+    const curLen = S.clip.end - S.clip.start;
+    const nlen = Math.max(2.0, curLen - 5.0);
+    await setTimes(+S.clip.start.toFixed(2), +(S.clip.start + nlen).toFixed(2));
+    toast('Length shortened to ' + nlen.toFixed(1) + 's');
+  });
+  if($('#lenPlus5')) $('#lenPlus5').onclick=guard(async ()=>{
+    const dur=(S.video&&S.video.duration)||86400;
+    const curLen = S.clip.end - S.clip.start;
+    const ne = Math.min(dur, S.clip.start + curLen + 5.0);
+    await setTimes(+S.clip.start.toFixed(2), +ne.toFixed(2));
+    toast('Length extended to ' + (ne - S.clip.start).toFixed(1) + 's');
+  });
 
   // Layout Engine
   $('#layout').onclick=guard(async e=>{
@@ -1741,11 +1894,12 @@ function drawBanner(){
   const by = typeof c.banner_y === 'number' ? c.banner_y : 0.12;
   const bsz = typeof c.banner_size === 'number' ? c.banner_size : 1.0;
   const bfont = c.banner_font || 'Impact, Arial, sans-serif';
+  const fpx = Math.round(14 * bsz);
   box.style.left = (bx * 100).toFixed(1) + '%';
   box.style.top = (by * 100).toFixed(1) + '%';
-  box.style.fontSize = (13 * bsz).toFixed(1) + 'px';
+  box.style.fontSize = fpx + 'px';
   box.style.fontFamily = bfont;
-  box.innerHTML=`<div class="${cls}"><span class="banner-drag-handle" title="Drag to move anywhere">⋮⋮</span><span>${esc(txt)}</span></div>`;
+  box.innerHTML=`<div class="${cls}" style="font-size:${fpx}px!important;font-family:${bfont}!important"><span class="banner-drag-handle" title="Drag to move anywhere">⋮⋮</span><span>${esc(txt)}</span></div>`;
   if(strip&&txtNode){
     strip.hidden=false;
     txtNode.textContent='🏷️ '+txt;
@@ -1799,6 +1953,7 @@ function markSeg(){
   if($('#camShape'))$('#camShape').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.shape===(c.cam_shape||'rect')));
   if($('#bannerStyle'))$('#bannerStyle').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.bs===(c.banner_style||'white_box')));
   if($('#bannerFont'))$('#bannerFont').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.bf===(c.banner_font||'Impact')));
+  if($('#capFont'))$('#capFont').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.cf===(c.caption_font||'Arial')));
   if($('#snapGrid'))$('#snapGrid').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.snap===(c.cam_corner||'tr')));
   if($('#dualSplitBox'))$('#dualSplitBox').hidden = c.layout !== 'stack';
   const ph=$('#phone');
@@ -1813,6 +1968,7 @@ function updDur(){
   if($('#studioDurBadge')) $('#studioDurBadge').textContent=(c.end-c.start).toFixed(1)+'s';
   if($('#inStartSec') && document.activeElement !== $('#inStartSec')) $('#inStartSec').value = c.start.toFixed(1);
   if($('#inEndSec') && document.activeElement !== $('#inEndSec')) $('#inEndSec').value = c.end.toFixed(1);
+  if($('#inLenSec') && document.activeElement !== $('#inLenSec')) $('#inLenSec').value = (c.end - c.start).toFixed(1);
   if($('#clipLenBadge')) $('#clipLenBadge').textContent = (c.end-c.start).toFixed(1)+'s';
 }
 async function saveSfx(list){await save({sfx:list});drawSfx();drawTrim()}
@@ -1942,13 +2098,50 @@ function trimEvents(){
   const trk=$('#tlVideoTrack'),v=$('#pv');
   if(!trk||!v)return;
   trk.onpointerdown=e=>{
-    const r=trk.getBoundingClientRect(),at=x=>T.lo+(T.hi-T.lo)*Math.min(1,Math.max(0,(x-r.left)/r.width)),h=e.target.dataset.h;
-    if(!h){v.currentTime=at(e.clientX);drawPh();updateTimeCode();return}
-    e.preventDefault();trk.setPointerCapture(e.pointerId);T.drag=true;let s=S.clip.start,en=S.clip.end;
-    trk.onpointermove=m=>{const t=at(m.clientX);if(h==='s')s=Math.min(t,en-3);else en=Math.max(t,s+3);
-      drawTrim(s,en);v.currentTime=h==='s'?s:en;updateTimeCode()};
-    trk.onpointerup=trk.onpointercancel=guard(async()=>{trk.onpointermove=trk.onpointerup=trk.onpointercancel=null;T.drag=false;
-      if(Math.abs(s-S.clip.start)>.05||Math.abs(en-S.clip.end)>.05)await setTimes(+s.toFixed(2),+en.toFixed(2));else drawTrim()})};
+    const r=trk.getBoundingClientRect();
+    const at=x=>T.lo+(T.hi-T.lo)*Math.min(1,Math.max(0,(x-r.left)/r.width));
+    const h=e.target.dataset.h;
+    const isRange=e.target.closest('#tsel');
+    if(!h && !isRange){
+      v.currentTime=at(e.clientX);
+      drawPh();
+      updateTimeCode();
+      return;
+    }
+    e.preventDefault();
+    trk.setPointerCapture(e.pointerId);
+    T.drag=true;
+    let s=S.clip.start, en=S.clip.end;
+    const initialS = s, initialEn = en, initialLen = Math.max(1.0, en - s);
+    const startT = at(e.clientX);
+    const total = tlTotal();
+
+    trk.onpointermove=m=>{
+      const t = at(m.clientX);
+      if(h==='s'){
+        s = Math.max(0, Math.min(t, en - 1.0));
+      } else if(h==='e'){
+        en = Math.min(total, Math.max(t, s + 1.0));
+      } else if(isRange){
+        const dt = t - startT;
+        s = Math.max(0, Math.min(total - initialLen, initialS + dt));
+        en = s + initialLen;
+      }
+      drawTrim(s, en);
+      v.currentTime = h==='e' ? en : s;
+      updateTimeCode();
+    };
+
+    trk.onpointerup=trk.onpointercancel=guard(async()=>{
+      trk.onpointermove=trk.onpointerup=trk.onpointercancel=null;
+      T.drag=false;
+      if(Math.abs(s-S.clip.start)>0.05 || Math.abs(en-S.clip.end)>0.05){
+        await setTimes(+s.toFixed(2), +en.toFixed(2));
+      } else {
+        drawTrim();
+      }
+    });
+  };
 }
 
 async function setTimes(s,e){
@@ -2239,7 +2432,9 @@ function drawCaption(){
     const sc=t.scale_active&&on?`transform:scale(${t.scale_active/100});`:'';
     return `<span style="color:${on?t.active:t.primary};${sc}">${esc(t.upper?w.w.toUpperCase():w.w)}</span>`;
   }).join(' ');
-  cap.style.cssText=`bottom:${(t.mv/1920*100).toFixed(1)}%;font:${t.bold?800:400} ${(t.size*k).toFixed(1)}px/1.15 ${t.font||'Arial'},Helvetica,sans-serif;text-shadow:${t.box?'none':tplShadow(t,k)}${t.glow?',0 0 '+(10*k*4).toFixed(0)+'px '+t.outline:''}`;
+  const csz = typeof c.caption_size === 'number' ? c.caption_size : 1.0;
+  const cfont = c.caption_font || t.font || 'Arial';
+  cap.style.cssText=`bottom:${(t.mv/1920*100).toFixed(1)}%;font:${t.bold?800:400} ${(t.size*k*csz).toFixed(1)}px/1.15 ${cfont},Helvetica,sans-serif;text-shadow:${t.box?'none':tplShadow(t,k)}${t.glow?',0 0 '+(10*k*4).toFixed(0)+'px '+t.outline:''}`;
   cap.innerHTML=t.box?`<span style="background:#000b;padding:.1em .35em;border-radius:4px">${html}</span>`:html;
 }
 function drawCues(){
@@ -2319,8 +2514,22 @@ async function refreshStorageUI(){
   }catch(e){}
 }
 if($('#mainCookieBadge'))$('#mainCookieBadge').onclick=()=>$('#setBtn').click();
+const learnText=r=>r.top&&r.top.length?`Learned from ${r.with_views} clips. Your best ones had: ${r.top.join(', ')}. New clips are ranked with this.`
+  :r.with_views<r.need?`${r.with_views} of ${r.need} clips have views. Post clips with their ClipForge title, then get views here (or type them in each clip).`
+  :`${r.with_views} clips have views. No clear pattern yet.`;
+if($('#s_fetch')) $('#s_fetch').onclick=guard(async()=>{
+  $('#s_learn').textContent='Reading your channel…';
+  try{
+    const r=await send('POST','/api/learn/fetch',{channel:$('#s_chan').value});
+    $('#s_learn').textContent=`Found ${r.posts} posts, matched ${r.matched} to your clips. `+learnText(r);
+  }catch(e){
+    $('#s_learn').textContent=e.message;
+  }
+});
 $('#setBtn').onclick=guard(async()=>{
   S.settings=await api('/api/settings');$('#s_model').value=S.settings.model||'base';$('#s_key').value='';
+  if($('#s_chan')) $('#s_chan').value=S.settings.my_channel||'';
+  api('/api/learn').then(r=>{if($('#s_learn'))$('#s_learn').textContent=learnText(r)}).catch(()=>{});
   updateCookieUI();
   refreshStorageUI();
   $('#s_state').textContent=S.settings.anthropic_key?(S.settings.ai_from_env?'AI scoring is on (key from the computer settings).':'AI scoring is on.'):'AI scoring is off.';$('#settings').showModal()});
@@ -2339,6 +2548,7 @@ $('#s_del_ck').onclick=guard(async()=>{
 $('#s_save').onclick=guard(async()=>{
   const b={model:$('#s_model').value,cookies_browser:$('#s_browser').value};
   if($('#s_key').value.trim())b.anthropic_key=$('#s_key').value.trim();
+  if($('#s_chan'))b.my_channel=$('#s_chan').value.trim();
   if($('#s_retention'))b.cleanup_hours=parseInt($('#s_retention').value,10);
   S.settings=await send('POST','/api/settings',b);$('#s_key').value='';
   $('#s_state').textContent=S.settings.anthropic_key?'Saved. AI scoring is on.':'Saved. AI scoring is off.';

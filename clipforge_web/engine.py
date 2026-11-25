@@ -2,7 +2,7 @@
 import functools, json, os, re, subprocess
 import numpy as np
 
-from clipforge import ai, analyze, audiolib, captions, faces
+from clipforge import ai, analyze, audiolib, captions, faces, game, voice
 from clipforge.render import RES, render_clip
 from clipforge.segments import HOOK_WORDS, snap, text_score, title_of
 from clipforge.source import download, download_section, youtube_chat
@@ -148,14 +148,83 @@ def _mmss(t):
     return f"{int(t // 60)}:{int(t % 60):02d}"
 
 
+# ---------------- learn from your posted clips' views ----------------
+FEATS = {"audio": "loud reactions", "chat": "chat bursts", "motion": "on-screen action", "heat": "most-replayed parts",
+         "speech": "talking", "ai": "AI editor score", "game": "game banners"}
+MIN_RESULTS = 6
+
+
+def _feat(comp, k):
+    v = comp.get(k)
+    return (1.0 if v else 0.0) if k == "game" else v
+
+
+def learned():
+    """{signal: weight} for the signals that go with more views, from clips you entered or fetched views for.
+    Empty until MIN_RESULTS clips have views. Weight = rank correlation of the signal with views."""
+    rows = db.q("select scores, views from clips where views is not null")
+    if len(rows) < MIN_RESULTS:
+        return {}
+    comps = [json.loads(r["scores"] or "{}") for r in rows]
+    ranks = np.argsort(np.argsort([r["views"] for r in rows])).astype(float)
+    out = {}
+    for k in FEATS:
+        pts = [(f, r) for comp, r in zip(comps, ranks) if (f := _feat(comp, k)) is not None]
+        if len(pts) >= MIN_RESULTS:
+            x, y = np.array(pts, float).T
+            if x.std() > 0 and y.std() > 0:
+                corr = float(np.corrcoef(x, y)[0, 1])
+                if corr > 0.1:
+                    out[k] = round(corr, 3)
+    return out
+
+
+def fit(comp, weights):
+    """0-1: how much this clip looks like your best performers, and the top signal behind it."""
+    have = {k: w for k, w in weights.items() if _feat(comp, k) is not None}
+    if not have:
+        return 0.0, ""
+    top = max(have, key=lambda k: have[k] * _feat(comp, k))
+    return round(sum(w * min(_feat(comp, k), 1.0) for k, w in have.items()) / sum(have.values()), 3), FEATS[top]
+
+
+def _norm(t):
+    return " ".join(re.sub(r"#\w+", " ", (t or "").lower()).translate({ord(ch): " " for ch in "!?.,:;'\"()[]-_|/"}).split())
+
+
+def match_views(posts):
+    """Give each made clip the views of your post with the same title. posts: [{title, views}]. Returns clips matched."""
+    import difflib
+    clips = db.q("select id, title from clips where render_path is not null or downloaded=1")
+    got = {}
+    for p in posts:
+        pt = _norm(p["title"])
+        best = max(((difflib.SequenceMatcher(None, _norm(c["title"]), pt).ratio()
+                     if not (len(_norm(c["title"])) >= 10 and _norm(c["title"]) in pt) else 1.0, c["id"]) for c in clips),
+                   default=(0, None))
+        if best[0] >= 0.8:
+            got[best[1]] = max(got.get(best[1], 0), p["views"])
+    for cid, views in got.items():
+        db.ex("update clips set views=? where id=?", (views, cid))
+    return len(got)
+
+
 def _reasons(peak, comp, words, hooks, wps, q_first, ai_info):
     r = []
     if ai_info and ai_info.get("reason"):
         r.append("AI editor: " + ai_info["reason"])
     if comp["audio"] >= 0.15:
         r.append(f"Loudness peak at {_mmss(peak)}: {comp['audio']:.0%} of the loudest moment in this video.")
-    if comp.get("motion") is not None and comp["motion"] >= 0.3:
+    if comp.get("action") == "chase":
+        r.append("Looks like a chase: the picture keeps moving fast for a long stretch.")
+    elif comp.get("action") == "crash":
+        r.append("Looks like a crash or explosion: a sudden jolt on screen with a loud bang.")
+    elif comp.get("motion") is not None and comp["motion"] >= 0.3:
         r.append(f"Big on-screen action here: {comp['motion']:.0%} of the wildest moment.")
+    if comp.get("game"):
+        r.append(f"On screen: {comp['game']}. A big game moment.")
+    if comp.get("fit") is not None and comp["fit"] >= 0.5 and comp.get("fit_by"):
+        r.append(f"Like the clips that got the most views on your channel (strong {comp['fit_by']}).")
     if comp["heat"] is not None:
         r.append(f"YouTube 'most replayed' signal here: {comp['heat']:.0%}.")
     if comp["chat"] is not None:
@@ -233,7 +302,20 @@ def analyze_video(job, video_id, p):
         motion = analyze.motion_score(ffmpeg, src, len(a))
         if motion is not None:
             np.save(mcache, motion)
-    score = analyze.combine(a, heat, chat, motion)
+    gcache = os.path.join(work, "game_events.json")
+    if os.path.exists(gcache):
+        with open(gcache) as f:
+            events = [tuple(e) for e in json.load(f)]
+    else:
+        prog(video_id, 18, "Looking for game banners (WASTED, BUSTED...)")
+        events = game.banners(ffmpeg, src, check=job.check)
+        if game.available():
+            with open(gcache, "w") as f:
+                json.dump(events, f)
+        job.log(f"Game banners: {len(events)} found." if game.available() else
+                "Game banners skipped (install requirements-extras.txt to turn them on).")
+    gscore = game.banner_score(events, len(a), analyze.FRAME)
+    score = analyze.combine(a, heat, chat, motion, gscore)
     k = max(1, len(score) // 400)
     curve = [round(float(score[i:i + k].max()), 3) for i in range(0, len(score), k)]
     db.ex("update videos set curve=? where id=?", (db.dumps({"step": k * analyze.FRAME, "v": curve}), video_id))
@@ -296,10 +378,22 @@ def analyze_video(job, video_id, p):
         prog(video_id, 86, "Asking the AI editor")
         ai_res = ai.score_clips(key, [{"id": str(i), "text": " ".join(w["w"] for w in c["cw"])}
                                       for i, c in enumerate(cands) if c["cw"]], log=job.log)
+    weights = learned()
     for i, c in enumerate(cands):
         c["ai"] = ai_res.get(str(i))
         sig = c["score"]
         c["final"] = (0.5 * sig + 0.1 * c["text"] + 0.4 * c["ai"]["score"]) if c["ai"] else (0.7 * sig + 0.3 * c["text"])
+        idx = min(int(c["peak"] / analyze.FRAME), len(a) - 1)
+        banner = next(((t, lab) for t, lab in events if c["s"] - 3 <= t <= c["e"]), (None, None))
+        c["comp"] = comp = {
+            "audio": float(a[idx]), "heat": None if heat is None else float(heat[idx]),
+            "motion": None if motion is None else float(motion[idx]),
+            "chat": None if chat is None else float(chat[idx]), "speech": float(c["text"]),
+            "action": analyze.action_kind(motion, a, int(c["s"] / analyze.FRAME), int(c["e"] / analyze.FRAME)),
+            "game": banner[1], "game_t": banner[0], "ai": c["ai"]["score"] if c["ai"] else None}
+        if weights:   # learned from your posted clips' views: 20% of the final score
+            comp["fit"], comp["fit_by"] = fit(comp, weights)
+            c["final"] = 0.8 * c["final"] + 0.2 * comp["fit"]
 
     # 6) best N, no overlaps
     prog(video_id, 94, "Ranking the clips")
@@ -309,11 +403,7 @@ def analyze_video(job, video_id, p):
     tpl_default = (client or {}).get("template") or "yellow_pop"
     music_default = (client or {}).get("music") or ""
     for c in chosen:
-        idx = min(int(c["peak"] / analyze.FRAME), len(a) - 1)
-        comp = {"audio": float(a[idx]), "heat": None if heat is None else float(heat[idx]),
-                "motion": None if motion is None else float(motion[idx]),
-                "chat": None if chat is None else float(chat[idx]), "speech": float(c["text"]),
-                "ai": c["ai"]["score"] if c["ai"] else None}
+        comp = c["comp"]
         txt = " ".join(w["w"] for w in c["cw"]).lower()
         hooks = [h for h in HOOK_WORDS if h in txt]
         first = " ".join(w["w"] for w in c["cw"][:12])
@@ -459,6 +549,10 @@ def auto_sfx(clip):
     if peak > 2:
         out.append({"f": "riser.wav", "t": peak - 1.5, "v": 0.35})
     out.append({"f": "boom.wav", "t": peak, "v": 0.8})
+    sc = json.loads(clip.get("scores") or "{}")
+    if sc.get("game_t") is not None and 0.3 < sc["game_t"] - s + 0.4 < dur - 0.5:   # meme sound on a game banner
+        fail = sc["game"] not in ("MISSION PASSED", "HEIST PASSED")
+        out.append({"f": audiolib.MEME_FAIL if fail else audiolib.MEME_WIN, "t": sc["game_t"] - s + 0.4, "v": 0.7})
     words = clip_words(clip)
     toks = [re.sub(r"[^a-z0-9 ]", "", w["w"].lower()) for w in words]
     last = -9.0
@@ -526,6 +620,39 @@ def edit_cue(clip, first, last, text):
             cur += d
         words[first:last + 1] = new
     return words
+
+
+# ---------------- translated captions + voice-over ----------------
+def _lang_and_voice(job, c, cues, work):
+    """Translate the captions (and voice-over line) when the clip has a language, then speak the voice-over.
+    Both are optional: any problem is logged and the clip is made without it."""
+    lang, text, vo_lang = c.get("lang") or "", (c.get("vo") or "").strip(), "en"
+    if lang and (cues or text):
+        key = ai_key()
+        if not key:
+            job.log("Translated captions need an AI key in Settings: using the original words.")
+        else:
+            try:
+                lines = ai.translate(key, [" ".join(w["w"] for w in q["words"]) for q in cues] + ([text] if text else []), lang)
+                if text:
+                    text = lines.pop()
+                cues = [captions.respread(q, t) for q, t in zip(cues, lines)]
+                vo_lang = lang
+                job.log(f"Translated to {ai.LANGS.get(lang, lang)}.")
+            except Exception as e:
+                job.log(f"Translation skipped ({str(e)[:120]}): using the original words.")
+    if not text:
+        return cues, None
+    if not voice.available():
+        job.log("Voice-over skipped: install requirements-extras.txt to turn it on.")
+        return cues, None
+    wav = os.path.join(work, f"clip_{c['id']}_vo.wav")
+    try:
+        job.log("Recording the voice-over (the first time downloads the voice, about 100 MB)...")
+        return cues, (wav, 0.2, voice.say(text, vo_lang, wav, os.path.join(db.DATA, "voices")))
+    except Exception as e:
+        job.log(f"Voice-over skipped ({str(e)[:120]}).")
+        return cues, None
 
 
 # ---------------- face framing + render ----------------
@@ -714,6 +841,8 @@ def render(job, clip_id, p):
     banner_y = float(c.get("banner_y") if c.get("banner_y") is not None else 0.12)
     banner_size = float(c.get("banner_size") if c.get("banner_size") is not None else 1.0)
     banner_font = str(c.get("banner_font") or "Arial")
+    caption_size = float(c.get("caption_size") if c.get("caption_size") is not None else 1.0)
+    caption_font = str(c.get("caption_font") or "Arial")
 
     res_base = int(c["res"] or 1080)
     aspect = str(c.get("aspect_ratio") or "9:16").strip()
@@ -726,10 +855,12 @@ def render(job, clip_id, p):
         W = res_base
         H = int(res_base * 16 / 9) // 2 * 2
 
+    cues, vo = _lang_and_voice(job, c, cues, work)
     with open(ass, "w", encoding="utf-8") as f:
         f.write(captions.to_ass(cues, c["template"], width=W, height=H, censor=censor, emojis=emojis, hook_boost=True,
                                 banner_text=banner_text, banner_style=banner_style, banner_x=banner_x, banner_y=banner_y,
-                                banner_size=banner_size, banner_font=banner_font))
+                                banner_size=banner_size, banner_font=banner_font,
+                                caption_size=caption_size, caption_font=caption_font))
     out_dir = os.path.join(db.DATA, "exports")
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"clip_{clip_id}.mp4")
@@ -793,7 +924,8 @@ def render(job, clip_id, p):
                 cam_corner=c.get("cam_corner") or "tr",
                 aspect_ratio=aspect,
                 game_zoom=float(c.get("game_zoom") or 1.0),
-                crop_y=float(c.get("crop_y") if c.get("crop_y") is not None else 0.5))
+                crop_y=float(c.get("crop_y") if c.get("crop_y") is not None else 0.5),
+                vo=vo)
     db.ex("update clips set render_status='done', render_progress=100, render_path=?, qc=? where id=?",
           (out, db.dumps(quality_check(ffmpeg, out, clip_words(c))), clip_id))
 

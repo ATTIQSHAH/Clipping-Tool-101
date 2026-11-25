@@ -9,9 +9,12 @@ ENC = {
 RES = {1080: (1080, 1920), 1440: (1440, 2560), 2160: (2160, 3840)}
 
 
-def _audio_graph(music, music_vol, duck, sfx, first_input):
+def _audio_graph(music, music_vol, duck, sfx, first_input, vo=None):
+    """vo: (wav, at, length) voice-over; the clip's own sound dips to 30% while it talks."""
     voice = "[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000"
-    if not music and not sfx:
+    if vo:
+        voice += f",volume=0.3:enable='between(t,{vo[1]:.2f},{vo[1] + vo[2] + 0.15:.2f})'"
+    if not music and not sfx and not vo:
         return voice + "[aout]", []
     inputs, parts, mix, n = [], [], ["[voice]"], first_input
     parts.append(voice + (",asplit=2[voice][sc]" if (music and duck) else "[voice]"))
@@ -30,6 +33,12 @@ def _audio_graph(music, music_vol, duck, sfx, first_input):
         parts.append(f"[{n}:a]aresample=48000,adelay={ms}|{ms},volume={vol}[s{k}]")
         mix.append(f"[s{k}]")
         n += 1
+    if vo:
+        ms = int(max(vo[1], 0) * 1000)
+        inputs += ["-i", vo[0]]
+        parts.append(f"[{n}:a]loudnorm=I=-14:TP=-1.5,aresample=48000,adelay={ms}|{ms}[vo]")
+        mix.append("[vo]")
+        n += 1
     parts.append("".join(mix) + f"amix=inputs={len(mix)}:duration=first:dropout_transition=0:normalize=0,"
                  "alimiter=limit=0.95[aout]")
     return ";".join(parts), inputs
@@ -40,7 +49,7 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
                 track=None, hook_zoom=True, on_progress=None,
                 cam_zoom=1.0, cam_shape="rect", cam_pos="top", cam_pos_x=0.5, cam_pos_y=0.65, split_ratio=0.5,
                 cam_crop_x=0.5, cam_crop_y=0.5, cam_corner="tr", aspect_ratio="9:16",
-                game_zoom=1.0, crop_y=0.5):
+                game_zoom=1.0, crop_y=0.5, vo=None):
     base = int(res or 1080)
     aspect = str(aspect_ratio or "9:16").strip()
     if aspect == "1:1":
@@ -200,7 +209,7 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         x = int(min(max((w - cw) * px_g, 0), w - cw)) // 2 * 2
         y = int(min(max((h - ch) * py_g, 0), h - ch)) // 2 * 2
         fc = f"[0:v]crop={cw}:{ch}:{x}:{y},scale={W}:{H}:flags=lanczos,setsar=1{zoom},ass={ass}[v]"
-    af, extra_in = _audio_graph(music, music_vol, duck, sfx, 1)
+    af, extra_in = _audio_graph(music, music_vol, duck, sfx, 1, vo)
     cmd = ([ffmpeg, "-nostdin", "-y", "-ss", f"{s:.3f}", "-t", f"{dur:.3f}", "-i", os.path.abspath(src)] + extra_in +
            ["-filter_complex", fc + ";" + af, "-map", "[v]", "-map", "[aout]"] + ENC[encoder] +
            ["-r", str(fps), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",

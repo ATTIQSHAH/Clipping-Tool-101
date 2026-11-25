@@ -82,8 +82,32 @@ class TestFeatures(unittest.TestCase):
     def test_db_columns(self):
         c = db.conn()
         cols = [r[1] for r in c.execute("PRAGMA table_info(clips)").fetchall()]
-        for expected in ["cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style", "game_zoom", "crop_y", "banner_x", "banner_y", "banner_size", "banner_font"]:
+        for expected in ["cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style", "game_zoom", "crop_y", "banner_x", "banner_y", "banner_size", "banner_font", "caption_size", "caption_font", "views", "lang", "vo"]:
             self.assertIn(expected, cols, f"Column {expected} missing from clips table")
+
+    def test_caption_size_and_respread(self):
+        from clipforge.captions import respread
+        cues = [{'start': 1.0, 'end': 3.0, 'words': [{'w': 'old', 'start': 1.0, 'end': 3.0}]}]
+        ass_large = to_ass(cues, caption_size=1.5, caption_font="Impact")
+        self.assertIn("Style: Main,Impact,", ass_large)
+
+        spread = respread({'start': 1.0, 'end': 3.0}, "Hola mundo")
+        self.assertEqual(len(spread["words"]), 2)
+        self.assertEqual(spread["words"][0]["w"], "Hola")
+        self.assertEqual(spread["words"][1]["w"], "mundo")
+
+    def test_action_kind(self):
+        from clipforge.analyze import action_kind
+        import numpy as np
+        # Single spike with audio boom = crash
+        motion_crash = np.array([0.1]*4 + [0.9] + [0.1]*5)
+        audio_crash = np.array([0.1]*4 + [0.8] + [0.1]*5)
+        self.assertEqual(action_kind(motion_crash, audio_crash, 0, 10), "crash")
+
+        # Sustained movement = chase
+        motion_chase = np.array([0.5, 0.6, 0.7, 0.5, 0.6])
+        audio_chase = np.array([0.2, 0.2, 0.2, 0.2, 0.2])
+        self.assertEqual(action_kind(motion_chase, audio_chase, 0, 5), "chase")
 
 if __name__ == '__main__':
     unittest.main()

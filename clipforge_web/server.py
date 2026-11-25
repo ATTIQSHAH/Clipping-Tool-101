@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
-from clipforge import ai, audiolib, captions, source
+from clipforge import ai, audiolib, captions, source, voice
 from clipforge.captions import TEMPLATES
 from clipforge.render import RES
 from clipforge.util import which, silent_flags
@@ -18,7 +18,8 @@ CLIP_FIELDS = {
     "title", "template", "layout", "res", "crop_x", "crop_y", "music", "sfx_intro", "sfx_peak",
     "captions", "status", "words", "hook_zoom", "emojis", "censor", "sfx",
     "cam_zoom", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style",
-    "banner_x", "banner_y", "banner_size", "banner_font", "split_ratio", "cam_corner", "cam_crop_x", "cam_crop_y", "game_zoom", "aspect_ratio"
+    "banner_x", "banner_y", "banner_size", "banner_font", "split_ratio", "cam_corner", "cam_crop_x", "cam_crop_y", "game_zoom", "aspect_ratio",
+    "views", "lang", "vo", "caption_size", "caption_font"
 }
 
 
@@ -451,10 +452,28 @@ def patch_clip(cid: int, body: dict = Body(...)):
             raise HTTPException(400, f"'{val}' isn't in the audio library.")
         if k == "sfx":
             val = db.dumps(_clean_sfx(val))
+        if k == "views":
+            try:
+                val = None if val in (None, "") else max(0, int(val))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Views must be a number.")
+        if k == "lang" and val and val not in ai.LANGS:
+            raise HTTPException(400, "Unknown language.")
+        if k == "vo":
+            val = str(val or "").strip()[:300]
+        if k == "caption_size":
+            try:
+                val = max(0.4, min(3.0, float(val)))
+            except (TypeError, ValueError):
+                val = 1.0
+        if k == "caption_font":
+            val = str(val or "Arial").strip()[:50]
         sets.append(f"{k}=?")
         if k in ("res", "captions", "hook_zoom", "emojis", "censor"):
             vals.append(int(val))
-        elif k in ("crop_x", "cam_zoom", "cam_pos_x", "cam_pos_y", "split_ratio", "cam_crop_x", "cam_crop_y", "banner_size", "banner_x", "banner_y", "game_zoom", "crop_y"):
+        elif k == "views":
+            vals.append(val)
+        elif k in ("crop_x", "cam_zoom", "cam_pos_x", "cam_pos_y", "split_ratio", "cam_crop_x", "cam_crop_y", "banner_size", "banner_x", "banner_y", "game_zoom", "crop_y", "caption_size"):
             vals.append(float(val))
         else:
             vals.append(str(val) if val is not None else "")
@@ -468,7 +487,8 @@ def patch_clip(cid: int, body: dict = Body(...)):
         sets += ["start=?", "end=?"]
         vals += [round(s, 3), round(e, 3)]
     if sets:
-        sets.append("render_status=case when render_status='done' then 'stale' else render_status end")
+        if any(not x.startswith(("status", "title", "views")) for x in sets) and c["render_status"] == "done":
+            sets.append("render_status='stale'")
         db.ex(f"update clips set {','.join(sets)} where id=?", vals + [cid])
     return _clip_out(_clip(cid))
 
@@ -782,15 +802,20 @@ def audio():
 def get_settings():
     cf = source.find_cookie_file()
     cleanup_h = int(db.setting("cleanup_hours", "48") or 48)
+    env = bool(os.environ.get("ANTHROPIC_API_KEY"))
     return {
-        "anthropic_key": bool(db.setting("anthropic_key")),
+        "anthropic_key": env or bool(db.setting("anthropic_key")),
         "has_password": bool(_pw()),
-        "anthropic_valid": ai.valid_key(db.setting("anthropic_key")) if db.setting("anthropic_key") else False,
+        "anthropic_valid": (ai.valid_key(os.environ["ANTHROPIC_API_KEY"]) if env
+                            else (ai.valid_key(db.setting("anthropic_key")) if db.setting("anthropic_key") else False)),
         "cookies_browser": db.setting("cookies_browser", ""),
         "has_cookies": bool(cf),
         "cookies_file": os.path.basename(cf) if cf else "",
         "cookies_path": cf or "",
         "cleanup_hours": cleanup_h,
+        "my_channel": db.setting("my_channel", ""),
+        "voice": voice.available(),
+        "langs": ai.LANGS,
     }
 
 
@@ -802,12 +827,37 @@ def update_settings(body: dict = Body(...)):
         db.set_setting("password", (body["password"] or "").strip())
     if "cookies_browser" in body:
         db.set_setting("cookies_browser", (body["cookies_browser"] or "").strip())
+    if "my_channel" in body:
+        db.set_setting("my_channel", (body["my_channel"] or "").strip())
     if "cleanup_hours" in body:
         try:
             db.set_setting("cleanup_hours", str(int(body["cleanup_hours"])))
         except (ValueError, TypeError):
             pass
     return get_settings()
+
+
+@app.get("/api/learn")
+def learn_state():
+    n = db.q("select count(*) n from clips where views is not null", one=True)["n"]
+    w = engine.learned()
+    return {"with_views": n, "need": engine.MIN_RESULTS,
+            "top": [engine.FEATS[k] for k in sorted(w, key=lambda k: -w[k])]}
+
+
+@app.post("/api/learn/fetch")
+def learn_fetch(body: dict = Body(...)):
+    """Read your channel's Shorts views and give them to the clips with the same title."""
+    ch = str(body.get("channel") or "").strip()
+    try:
+        posts = source.my_posts(ch)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, str(e)[:300])
+    db.set_setting("my_channel", ch)
+    return dict(learn_state(), posts=len(posts), matched=engine.match_views(posts))
+
 
 
 @app.get("/api/settings/storage")
