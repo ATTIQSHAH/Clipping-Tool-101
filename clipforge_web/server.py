@@ -184,7 +184,7 @@ def _clip_out(c):
     o["emojis"] = int(c["emojis"]) if ("emojis" in c and c["emojis"] is not None) else 1
     o["censor"] = int(c["censor"]) if ("censor" in c and c["censor"] is not None) else 0
     o["sfx_peak"] = c.get("sfx_peak") or ""
-    o["rendered"] = bool(c["render_path"] and os.path.exists(c["render_path"]))
+    o["rendered"] = bool(c["render_path"] and os.path.exists(c["render_path"]) and c.get("render_status") == "done")
     o["split_ratio"] = float(c.get("split_ratio") or 0.5)
     o["cam_corner"] = c.get("cam_corner") or "tr"
     o["cam_zoom"] = float(c.get("cam_zoom") or 1.0)
@@ -354,7 +354,7 @@ def patch_video(vid: int, body: dict = Body(...)):
                 raise HTTPException(400, "Facecam box must be [x, y, w, h].")
             val = db.dumps([int(n) for n in val])
         db.ex("update videos set cam_box=? where id=?", (val, vid))
-        db.ex("update clips set cam=null where video_id=?", (vid,))
+        db.ex("update clips set cam=null, render_status=case when render_status='done' then 'stale' else render_status end where video_id=?", (vid,))
     return _video(vid)
 
 
@@ -375,9 +375,10 @@ def approve_all_clips(vid: int):
         try:
             cid = c["id"]
             db.ex("update clips set status='approved' where id=?", (cid,))
-            is_rendered = bool(c["render_path"] and os.path.exists(c["render_path"]))
-            needs_render = not is_rendered
+            is_valid_render = bool(c["render_path"] and os.path.exists(c["render_path"]) and c["render_status"] == "done")
+            needs_render = not is_valid_render
             if needs_render and c["render_status"] != "running":
+                db.ex("update clips set render_status='queued', render_progress=0 where id=?", (cid,))
                 worker.enqueue("render", cid)
             count += 1
         except Exception:
@@ -396,8 +397,9 @@ def approve_batch_clips(body: dict = Body(...)):
             if not c:
                 continue
             db.ex("update clips set status='approved' where id=?", (cid,))
-            is_rendered = bool(c["render_path"] and os.path.exists(c["render_path"]))
-            if not is_rendered and c["render_status"] != "running":
+            is_valid_render = bool(c["render_path"] and os.path.exists(c["render_path"]) and c["render_status"] == "done")
+            if not is_valid_render and c["render_status"] != "running":
+                db.ex("update clips set render_status='queued', render_progress=0 where id=?", (cid,))
                 worker.enqueue("render", cid)
             count += 1
         except Exception:
@@ -579,7 +581,8 @@ def patch_clip(cid: int, body: dict = Body(...)):
         sets += ["start=?", "end=?"]
         vals += [round(s, 3), round(e, 3)]
     if sets:
-        if any(not x.startswith(("status", "title", "views")) for x in sets) and c["render_status"] == "done":
+        render_keys = any(not x.startswith(("status", "title", "views")) for x in sets)
+        if render_keys and c["render_status"] != "running":
             sets.append("render_status='stale'")
         db.ex(f"update clips set {','.join(sets)} where id=?", vals + [cid])
     return _clip_out(_clip(cid))
@@ -723,9 +726,10 @@ def approve_clip(cid: int, body: Optional[dict] = Body(None)):
     if s and s["status"] == "no" and not (body or {}).get("permission"):
         raise HTTPException(409, f"{s['name']} doesn't allow clipping. Only go on if you have their permission.")
     db.ex("update clips set status='approved' where id=?", (cid,))
-    is_rendered = bool(c["render_path"] and os.path.exists(c["render_path"]))
-    needs_render = not is_rendered
+    is_valid_render = bool(c["render_path"] and os.path.exists(c["render_path"]) and c["render_status"] == "done")
+    needs_render = not is_valid_render
     if needs_render and c["render_status"] != "running":
+        db.ex("update clips set render_status='queued', render_progress=0 where id=?", (cid,))
         worker.enqueue("render", cid)
     c_updated = _clip_out(_clip(cid))
     return {"ok": True, "needs_render": needs_render, "clip": c_updated}
@@ -743,6 +747,10 @@ def trigger_render(cid: int):
 def download_clip(cid: int):
     c = _clip(cid)
     p = c["render_path"]
+    if c.get("render_status") in ("queued", "running"):
+        raise HTTPException(409, "Clip is currently being rendered. Please wait a moment.")
+    if c.get("render_status") == "stale":
+        raise HTTPException(409, "Clip settings have been updated and must be re-rendered before downloading. Click Re-render & Export.")
     if not p or not os.path.exists(p):
         raise HTTPException(404, "Clip hasn't been rendered yet.")
     db.ex("update clips set downloaded=1 where id=?", (cid,))

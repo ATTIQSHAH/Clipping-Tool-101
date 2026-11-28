@@ -48,31 +48,31 @@ def _bgr(hexcol, alpha=0):
 
 
 # mode: "phrase" (2-4 words on screen, spoken word highlighted) or "word" (one word at a time)
-# mv: distance of the text from the bottom edge (px on a 1920-high canvas); scale_active: grow the spoken word (%)
-# glow: soft glow around letters; box: dark box behind the text
+# mv: distance of the text from the bottom edge (px on a 1920-high canvas, placed lower to preserve center content)
+# scale_active: grow the spoken word (%); glow: soft glow around letters; box: dark box behind the text
 TEMPLATES = {
     "yellow_pop": dict(font="Arial", size=86, bold=1, primary="#FFFFFF", active="#FFE600", outline="#000000", ow=7,
-                       shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=470, scale_active=0, glow=0),
+                       shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=160, scale_active=0, glow=0),
     "bold_white": dict(font="Arial", size=86, bold=1, primary="#FFFFFF", active="#FFFFFF", outline="#000000", ow=7,
-                       shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=470, scale_active=0, glow=0),
+                       shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=160, scale_active=0, glow=0),
     "karaoke_green": dict(font="Arial", size=84, bold=1, primary="#FFFFFF", active="#39FF88", outline="#0B2A18", ow=8,
-                          shadow=2, box=False, upper=True, pop=False, mode="phrase", mv=470, scale_active=0, glow=0),
+                          shadow=2, box=False, upper=True, pop=False, mode="phrase", mv=160, scale_active=0, glow=0),
     "hype_scale": dict(font="Arial", size=80, bold=1, primary="#FFFFFF", active="#FF3B5C", outline="#000000", ow=7,
-                       shadow=3, box=False, upper=True, pop=False, mode="phrase", mv=700, scale_active=125, glow=0),
+                       shadow=3, box=False, upper=True, pop=False, mode="phrase", mv=175, scale_active=125, glow=0),
     "neon": dict(font="Arial", size=84, bold=1, primary="#FFFFFF", active="#00E5FF", outline="#0077FF", ow=6,
-                 shadow=0, box=False, upper=True, pop=True, mode="phrase", mv=520, scale_active=0, glow=1),
+                 shadow=0, box=False, upper=True, pop=True, mode="phrase", mv=165, scale_active=0, glow=1),
     "boxed": dict(font="Arial", size=76, bold=1, primary="#FFFFFF", active="#FFD400", outline="#000000", ow=14,
-                  shadow=0, box=True, upper=False, pop=False, mode="phrase", mv=470, scale_active=0, glow=0),
-    "one_word": dict(font="Arial", size=150, bold=1, primary="#FFFFFF", active="#FFE600", outline="#000000", ow=10,
-                     shadow=3, box=False, upper=True, pop=True, mode="word", mv=650, scale_active=0, glow=0),
+                  shadow=0, box=True, upper=False, pop=False, mode="phrase", mv=160, scale_active=0, glow=0),
+    "one_word": dict(font="Arial", size=130, bold=1, primary="#FFFFFF", active="#FFE600", outline="#000000", ow=10,
+                     shadow=3, box=False, upper=True, pop=True, mode="word", mv=190, scale_active=0, glow=0),
     "minimal": dict(font="Arial", size=62, bold=0, primary="#FFFFFF", active="#FFFFFF", outline="#000000", ow=4,
-                    shadow=1, box=False, upper=False, pop=False, mode="phrase", mv=300, scale_active=0, glow=0),
+                    shadow=1, box=False, upper=False, pop=False, mode="phrase", mv=135, scale_active=0, glow=0),
     "impact_fire": dict(font="Impact", size=90, bold=1, primary="#FFFFFF", active="#FF4500", outline="#000000", ow=8,
-                        shadow=3, box=False, upper=True, pop=True, mode="phrase", mv=480, scale_active=115, glow=0),
+                        shadow=3, box=False, upper=True, pop=True, mode="phrase", mv=160, scale_active=115, glow=0),
     "montserrat_cyan": dict(font="Montserrat", size=84, bold=1, primary="#FFFFFF", active="#00F2FE", outline="#000000", ow=6,
-                            shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=470, scale_active=0, glow=0),
+                            shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=160, scale_active=0, glow=0),
     "comic_pop": dict(font="Comic Sans MS", size=84, bold=1, primary="#FFFFFF", active="#FFD700", outline="#000000", ow=7,
-                      shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=470, scale_active=0, glow=0),
+                      shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=160, scale_active=0, glow=0),
 }
 
 

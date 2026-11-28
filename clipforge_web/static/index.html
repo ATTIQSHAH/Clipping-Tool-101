@@ -401,6 +401,7 @@ function stateBadge(k){
   const qcWarn = (k.qc&&k.qc.some(x=>x.level==='fail')) ? '<span class="pill err" style="background:#ef444433;color:#ef4444;border:1px solid #ef4444" title="Quality issue detected">⚠️ Check quality</span> ' : '';
   if(k.render_status==='running'||k.render_status==='queued')return qcWarn + `<span class="pill busy">${k.render_status==='queued'?'Waiting':'Preparing '+Math.round(k.render_progress)+'%'}</span>`;
   if(k.render_status==='failed')return qcWarn + '<span class="pill err">Failed</span>';
+  if(k.render_status==='stale')return qcWarn + '<span class="pill busy" style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b44">Modified · Needs Re-render</span>';
   if(k.status==='approved'&&k.rendered&&k.downloaded)return qcWarn + '<span class="pill ok">Saved to Downloads ✓</span>';
   if(k.status==='approved'&&k.rendered)return qcWarn + '<span class="pill ok">Ready</span>';
   if(k.status==='approved')return qcWarn + '<span class="pill ok">Approved</span>';
@@ -924,18 +925,31 @@ function buildEditor(){
 
         <!-- Panel 3: Subtitles & Captions -->
         <div class="studio-panel" id="spanel-captions">
-          <div>
+          <!-- Prominent Caption Enable/Disable Switch -->
+          <div style="background:#131828;border:1.5px solid ${c.captions ? '#3b82f655' : '#334155'};border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <div style="display:flex;align-items:center;gap:12px">
+              <input type="checkbox" id="capon" ${c.captions?'checked':''} style="width:20px;height:20px;accent-color:#38bdf8;cursor:pointer">
+              <div>
+                <label for="capon" style="font-size:13.5px;font-weight:700;color:#fff;cursor:pointer;margin:0;display:block">
+                  💬 Include Captions on this clip
+                </label>
+                <span class="muted small" id="caponDesc" style="font-size:11.5px;color:${c.captions?'#94a3b8':'#f59e0b'}">
+                  ${c.captions ? 'Captions are enabled and will be burned into the exported video.' : 'Captions disabled — will export clean video without subtitles.'}
+                </span>
+              </div>
+            </div>
+            <button id="dlSrtBtn" class="ghost fit" style="font-size:11px;padding:4px 8px" title="Download standard SRT subtitle file">📥 Subtitles (.SRT)</button>
+          </div>
+
+          <div id="captionSettingsBody" style="${c.captions ? '' : 'opacity:0.4;pointer-events:none;'}">
             <div class="row" style="justify-content:space-between;align-items:center">
               <label style="margin:0">Caption Style Preset</label>
-              <button id="dlSrtBtn" class="ghost fit" style="font-size:11.5px;padding:3px 8px" title="Download standard SRT subtitle file">📥 Download Subtitles (.SRT)</button>
             </div>
             <div class="styles" id="tpls" style="margin-top:6px"></div>
             <div class="row" style="margin-top:8px;gap:12px;flex-wrap:wrap">
-              <label style="margin:0" class="fit"><input type="checkbox" id="capon" ${c.captions?'checked':''}> Burn captions</label>
               <label style="margin:0" class="fit"><input type="checkbox" id="hookzoom" ${c.hook_zoom!==0?'checked':''}> ⚡ 3s Hook Zoom</label>
               <label style="margin:0" class="fit"><input type="checkbox" id="censor" ${c.censor?'checked':''}> 🤬 Censor swear words</label>
             </div>
-          </div>
 
           <!-- Subtitle Font Size Scaling -->
           <div style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px;margin-top:8px">
@@ -990,6 +1004,7 @@ function buildEditor(){
           <h3 style="margin:4px 0">Word-by-word Subtitles</h3>
           <p class="muted small" style="margin:2px 0 6px">Click any word to jump to that moment.</p>
           <div id="cues"></div>
+          </div>
         </div>
 
         <!-- Panel 4: Audio & Built-in SFX -->
@@ -1660,7 +1675,23 @@ function buildEditor(){
 
   // Caption options
   $('#tpls').onclick=guard(async e=>{const b=e.target.closest('[data-t]');if(!b)return;await save({template:b.dataset.t});el.querySelectorAll('#tpls .style').forEach(x=>x.classList.toggle('on',x===b));drawCaption()});
-  $('#capon').onchange=guard(e=>save({captions:e.target.checked?1:0}).then(drawCaption));
+  $('#capon').onchange=guard(async e=>{
+    const on = e.target.checked ? 1 : 0;
+    S.clip.captions = on;
+    const body = $('#captionSettingsBody');
+    if(body){
+      body.style.opacity = on ? '1' : '0.4';
+      body.style.pointerEvents = on ? 'auto' : 'none';
+    }
+    const desc = $('#caponDesc');
+    if(desc){
+      desc.textContent = on ? 'Captions are enabled and will be burned into the exported video.' : 'Captions disabled — will export clean video without subtitles.';
+      desc.style.color = on ? '#94a3b8' : '#f59e0b';
+    }
+    await save({captions: on});
+    drawCaption();
+    toast(on ? 'Captions enabled.' : 'Captions disabled.');
+  });
   $('#hookzoom').onchange=guard(e=>save({hook_zoom:e.target.checked?1:0}));
   $('#censor').onchange=guard(e=>save({censor:e.target.checked?1:0}));
 
@@ -2698,6 +2729,7 @@ function updateApproveUI(){
   let txt;
   if(busy)txt=rs==='queued'?'Waiting…':`Preparing ${Math.round(c.render_progress||0)}%`;
   else if(rs==='failed')txt='Try again';
+  else if(rs==='stale')txt='🔄 Re-render & Export';
   else if(c.status==='approved'&&c.rendered&&rs==='done')txt=c.downloaded?'Saved ✓  Download again':'Download';
   else txt='🚀 Approve & Export';
   if(lab&&lab.dataset.t!==txt){lab.dataset.t=txt;lab.innerHTML=txt.includes('✓')?txt.replace('✓','<b class="check">✓</b>'):esc(txt)}

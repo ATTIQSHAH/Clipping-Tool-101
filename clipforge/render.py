@@ -117,12 +117,16 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
     is_pip = layout == "pip"
     if is_pip and cam and w / h > target_ratio + 0.01:
         from .faces import PIP_SIZE, PIP_TOP
+        from .faces import PIP_SIZE, PIP_TOP
         cx, cy, cw_, ch_ = cam
-        cs = max(0.4, min(float(cam_size or 1.0), 2.5))
-        pw = int(min(W, H) * (PIP_SIZE if aspect == "9:16" else 0.38) * cs) // 2 * 2
-        ph = int(pw * ch_ / cw_) // 2 * 2
+        cs = max(0.4, min(float(cam_size if cam_size is not None else 1.0), 2.5))
+        base_w = int(min(W, H) * (0.44 if cam_shape == "circle" else (PIP_SIZE if aspect == "9:16" else 0.38)))
+        pw = int(base_w * cs) // 2 * 2
+        ph = pw if cam_shape == "circle" else int(pw * ch_ / cw_) // 2 * 2
         
-        # Position calculation
+        # Position calculation matching preview coordinates
+        val_x = max(0.0, min(float(cam_pos_x if cam_pos_x is not None else 0.5), 1.0))
+        val_y = max(0.0, min(float(cam_pos_y if cam_pos_y is not None else 0.65), 1.0))
         if cam_pos == "pip_top":
             ox, oy = "(W-w)/2", str(int(H * PIP_TOP))
         elif cam_pos == "pip_bottom":
@@ -130,8 +134,6 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         elif cam_pos == "pip_center":
             ox, oy = "(W-w)/2", "(H-h)/2"
         else:
-            val_x = max(0.02, min(float(cam_pos_x or 0.5), 0.98))
-            val_y = max(0.02, min(float(cam_pos_y or 0.65), 0.98))
             ox = f"(W-w)*{val_x:.3f}"
             oy = f"(H-h)*{val_y:.3f}"
 
