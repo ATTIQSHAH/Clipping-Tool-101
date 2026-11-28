@@ -100,6 +100,7 @@ def download(job, url, outdir, max_height=1080, cookies_browser=None, on_progres
                 state["parts"] += 1
 
         cmd = [ytdlp, "-f", fmt, "--merge-output-format", "mp4", "--write-info-json", "--no-playlist",
+               "--write-auto-subs", "--write-subs", "--sub-langs", "en.*,en",
                "--concurrent-fragments", "4", "--no-mtime", "--socket-timeout", "15", "--retries", "3",
                "-o", base + ".%(ext)s"] + extra + [url]
         job.run_lines(cmd, line)

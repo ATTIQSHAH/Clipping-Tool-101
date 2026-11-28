@@ -6,7 +6,7 @@ from clipforge import ai, analyze, audiolib, captions, faces, game, voice
 from clipforge.render import RES, render_clip
 from clipforge.segments import HOOK_WORDS, snap, text_score, title_of
 from clipforge.source import download, download_section, youtube_chat
-from clipforge.transcribe import load_json, transcribe_file
+from clipforge.transcribe import load_json, transcribe_file, parse_subtitles_file
 from clipforge.util import Cancelled, probe, which
 from . import db
 
@@ -333,10 +333,29 @@ def analyze_video(job, video_id, p):
         c["we"] = min(dur, max(c["ws"] + 2.0, c["end"] + pad))
     covered = sum(max(0.0, c["we"] - c["ws"]) for c in cands)
 
-    # 3) transcribe: once for the whole video if the clips cover most of it, otherwise only the good moments
+    # 3) transcribe: check for native video transcript first (YouTube .json3/.vtt/.srt), then Whisper
     prog(video_id, 20, "Reading what is said")
+    tj = os.path.join(work, f"full_{model}.json")
+    if not os.path.exists(tj):
+        # Look for downloaded native transcript files
+        sub_cands = []
+        for d in (os.path.dirname(src), work):
+            if os.path.isdir(d):
+                for fn in os.listdir(d):
+                    if fn.endswith((".json3", ".vtt", ".srt")) and ("sub" in fn or "en" in fn or fn.startswith("source_")):
+                        sub_cands.append(os.path.join(d, fn))
+        for sc in sub_cands:
+            try:
+                native_words = parse_subtitles_file(sc)
+                if native_words and len(native_words) >= 15:
+                    job.log(f"Using native video transcript with {len(native_words)} words from {os.path.basename(sc)}.")
+                    with open(tj, "w", encoding="utf-8") as f:
+                        json.dump({"words": native_words}, f)
+                    break
+            except Exception:
+                pass
+
     if covered >= 0.45 * dur or len(cands) > 40:
-        tj = os.path.join(work, f"full_{model}.json")
         if not os.path.exists(tj):
             wav = os.path.join(work, "full.wav")
             if not os.path.exists(wav):
@@ -470,7 +489,8 @@ def ensure_clip_words(clip, video=None):
         cmd = [ffmpeg, "-y", "-ss", f"{ss_val:.3f}", "-t", f"{dur:.3f}", "-i", src,
                "-vn", "-ac", "1", "-ar", "16000", clip_wav]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        tr = transcribe_file(clip_wav, model="base")
+        m_size = db.setting("model") or "large-v3-turbo"
+        tr = transcribe_file(clip_wav, model=m_size)
         tr_words = tr.get("words") or []
         if tr_words:
             new_words = []
@@ -855,6 +875,7 @@ def render(job, clip_id, p):
     banner_font = str(c.get("banner_font") or "Arial")
     caption_size = float(c.get("caption_size") if c.get("caption_size") is not None else 1.0)
     caption_font = str(c.get("caption_font") or "Arial")
+    caption_y = float(c["caption_y"]) if c.get("caption_y") is not None else None
     banner_t0, banner_t1 = banner_times(c)
 
     res_base = int(c["res"] or 1080)
@@ -874,6 +895,7 @@ def render(job, clip_id, p):
                                 banner_text=banner_text, banner_style=banner_style, banner_x=banner_x, banner_y=banner_y,
                                 banner_size=banner_size, banner_font=banner_font,
                                 caption_size=caption_size, caption_font=caption_font,
+                                caption_y=caption_y,
                                 banner_t0=banner_t0, banner_t1=banner_t1))
     out_dir = os.path.join(db.DATA, "exports")
     os.makedirs(out_dir, exist_ok=True)

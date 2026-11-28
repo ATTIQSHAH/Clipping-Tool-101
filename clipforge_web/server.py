@@ -19,7 +19,7 @@ CLIP_FIELDS = {
     "captions", "status", "words", "hook_zoom", "emojis", "censor", "sfx",
     "cam_zoom", "cam_size", "cam_shape", "cam_pos", "cam_pos_x", "cam_pos_y", "banner_text", "banner_style",
     "banner_x", "banner_y", "banner_size", "banner_font", "banner_start", "banner_end", "split_ratio", "cam_corner", "cam_crop_x", "cam_crop_y", "game_zoom", "aspect_ratio",
-    "views", "lang", "vo", "caption_size", "caption_font"
+    "views", "lang", "vo", "caption_size", "caption_font", "caption_y"
 }
 
 
@@ -193,6 +193,7 @@ def _clip_out(c):
     o["crop_y"] = float(c.get("crop_y") if c.get("crop_y") is not None else 0.5)
     o["banner_x"] = float(c.get("banner_x") if c.get("banner_x") is not None else 0.5)
     o["banner_y"] = float(c.get("banner_y") if c.get("banner_y") is not None else 0.12)
+    o["caption_y"] = float(c.get("caption_y") if c.get("caption_y") is not None else 0.88)
     if c["render_status"] == "failed":
         j = db.q("select error from jobs where type='render' and ref_id=? and status='failed' order by id desc limit 1",
                  (c["id"],), one=True)
@@ -567,7 +568,7 @@ def patch_clip(cid: int, body: dict = Body(...)):
             vals.append(int(val))
         elif k in ("views", "banner_start", "banner_end"):
             vals.append(val)
-        elif k in ("crop_x", "cam_zoom", "cam_size", "cam_pos_x", "cam_pos_y", "split_ratio", "cam_crop_x", "cam_crop_y", "banner_size", "banner_x", "banner_y", "game_zoom", "crop_y", "caption_size"):
+        elif k in ("crop_x", "cam_zoom", "cam_size", "cam_pos_x", "cam_pos_y", "split_ratio", "cam_crop_x", "cam_crop_y", "banner_size", "banner_x", "banner_y", "game_zoom", "crop_y", "caption_size", "caption_y"):
             vals.append(float(val))
         else:
             vals.append(str(val) if val is not None else "")

@@ -58,5 +58,35 @@ class TestExportInvalidationAndCaptions(unittest.TestCase):
         c_approved = server._clip(cid)
         self.assertEqual(c_approved["render_status"], "queued")
 
+    def test_new_templates_exist_and_low(self):
+        new_tpls = ["red_fury", "electric_violet", "clean_gold", "cyber_cyan"]
+        for t in new_tpls:
+            self.assertIn(t, TEMPLATES)
+            self.assertLessEqual(TEMPLATES[t]["mv"], 200)
+
+    def test_caption_y_positioning(self):
+        # caption_y = 0.88 means baseline is 12% from bottom (approx 230px on 1920)
+        ass = captions.to_ass([{"start": 0, "end": 1, "words": [{"w": "test", "start": 0, "end": 1}]}],
+                              "yellow_pop", width=1080, height=1920, caption_y=0.90)
+        self.assertIn("Style: Main,", ass)
+        # Verify MarginV is calculated from caption_y: 1920 * (1.0 - 0.90) = 192
+        self.assertIn(",192,1", ass)
+
+    def test_parse_subtitles_file(self):
+        import tempfile
+        from clipforge.transcribe import parse_subtitles_file
+        # Test WebVTT parser
+        with tempfile.NamedTemporaryFile("w", suffix=".vtt", delete=False) as f:
+            f.write("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nFast streamer speech\n")
+            vtt_path = f.name
+        try:
+            words = parse_subtitles_file(vtt_path)
+            self.assertEqual(len(words), 3)
+            self.assertEqual(words[0]["w"], "Fast")
+            self.assertEqual(words[1]["w"], "streamer")
+            self.assertEqual(words[2]["w"], "speech")
+        finally:
+            os.remove(vtt_path)
+
 if __name__ == "__main__":
     unittest.main()

@@ -73,8 +73,15 @@
 <dialog id="settings">
   <h2 style="margin-bottom:12px">Settings</h2>
   <div class="stack">
-    <div><label for="s_model">Speech accuracy</label>
-      <select id="s_model"><option value="base">Fast (base)</option><option value="small">Better (small)</option><option value="medium">Best, slow (medium)</option></select></div>
+    <div><label for="s_model">Whisper Speech Model (Accuracy & Speed)</label>
+      <select id="s_model">
+        <option value="large-v3-turbo">🚀 Ultra Accurate & Fast (Whisper Large-v3-Turbo - Best for Fast Speech)</option>
+        <option value="medium">🎯 High Accuracy (Whisper Medium)</option>
+        <option value="small">⚡ Balanced (Whisper Small)</option>
+        <option value="base">Standard (Whisper Base)</option>
+      </select>
+      <p class="muted small" style="margin:4px 0 0">Whisper Large-v3-Turbo catches every word even when streamers talk very fast, without eating words.</p>
+    </div>
     <div><label for="s_key">AI scoring key (optional)</label><input id="s_key" type="password" placeholder="Anthropic API key" autocomplete="off">
       <p class="muted small" style="margin:6px 0 0">With a key, an AI editor also reads each clip's transcript to judge humor, surprise and whether the clip is complete. The transcripts are sent to Anthropic. Without a key the built-in scoring is used.</p></div>
     <div><label for="s_chan">Learn from your channel</label><div class="row"><input id="s_chan" placeholder="https://www.youtube.com/@yourchannel"><button id="s_fetch" class="fit" type="button">Get views</button></div>
@@ -962,7 +969,26 @@ function buildEditor(){
               </div>
             </div>
             <input id="capSize" type="range" min="0.5" max="3.0" step="0.05" value="${c.caption_size || 1.0}">
-            <div class="row muted small"><span>0.5x Small</span><span style="flex:1;text-align:center">1.0x Normal</span><span>3.0x Huge</span></div>
+            <div class="row" style="margin-top:6px;gap:6px">
+              <button class="ghost fit cap-sz-btn" data-sz="0.75" style="flex:1;font-size:11px;padding:3px 0">0.75x Small</button>
+              <button class="ghost fit cap-sz-btn" data-sz="1.0" style="flex:1;font-size:11px;padding:3px 0">1.0x Normal</button>
+              <button class="ghost fit cap-sz-btn" data-sz="1.25" style="flex:1;font-size:11px;padding:3px 0">1.25x Large</button>
+              <button class="ghost fit cap-sz-btn" data-sz="1.5" style="flex:1;font-size:11px;padding:3px 0">1.5x Huge</button>
+            </div>
+          </div>
+
+          <!-- Subtitle Vertical Position (Lower Portion) -->
+          <div style="background:#131828;border:1px solid #2d3748;padding:10px;border-radius:8px;margin-top:8px">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <label style="margin:0;font-weight:700">Vertical Position: <b id="capPosVal" style="color:var(--accent)">${Math.round(((c.caption_y != null ? c.caption_y : 0.88)) * 100)}% (Lower)</b></label>
+              <div class="row fit" style="gap:4px">
+                <button id="capPosLow" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Position near bottom edge">Bottom (91%)</button>
+                <button id="capPosMid" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Position in lower third">Lower (85%)</button>
+                <button id="capPosReset" class="ghost fit" style="padding:2px 6px;font-size:11px" title="Reset to standard position">Default (88%)</button>
+              </div>
+            </div>
+            <input id="capPosY" type="range" min="0.75" max="0.95" step="0.01" value="${c.caption_y != null ? c.caption_y : 0.88}">
+            <div class="row muted small"><span>Lower Third (75%)</span><span style="flex:1;text-align:center">Lower Safe (88%)</span><span>Bottom Edge (95%)</span></div>
           </div>
 
           <!-- Subtitle Font Style -->
@@ -1510,6 +1536,31 @@ function buildEditor(){
   if($('#capSizeDown')) $('#capSizeDown').onclick=guard(()=>updateCaptionSize((S.clip.caption_size||1.0)-0.1));
   if($('#capSizeUp')) $('#capSizeUp').onclick=guard(()=>updateCaptionSize((S.clip.caption_size||1.0)+0.1));
   if($('#capSizeReset')) $('#capSizeReset').onclick=guard(()=>updateCaptionSize(1.0));
+  $$('.cap-sz-btn').forEach(btn => {
+    btn.onclick = guard(() => updateCaptionSize(+btn.dataset.sz));
+  });
+
+  // Subtitle Vertical Position (Lower Portion)
+  const cposInp=$('#capPosY'), cposVal=$('#capPosVal');
+  const updateCaptionY = async val => {
+    val = Math.round(Math.max(0.70, Math.min(0.96, val)) * 100) / 100;
+    S.clip.caption_y = val;
+    if(cposInp) cposInp.value = val;
+    if(cposVal) cposVal.textContent = Math.round(val * 100) + '% (Lower)';
+    drawCaption();
+    await save({caption_y: val});
+  };
+  if(cposInp){
+    cposInp.oninput=e=>{
+      S.clip.caption_y = +e.target.value;
+      if(cposVal) cposVal.textContent = Math.round(S.clip.caption_y * 100) + '% (Lower)';
+      drawCaption();
+    };
+    cposInp.onchange=guard(e=>updateCaptionY(+e.target.value));
+  }
+  if($('#capPosLow')) $('#capPosLow').onclick=guard(()=>updateCaptionY(0.91));
+  if($('#capPosMid')) $('#capPosMid').onclick=guard(()=>updateCaptionY(0.85));
+  if($('#capPosReset')) $('#capPosReset').onclick=guard(()=>updateCaptionY(0.88));
   if($('#capFont')){
     $('#capFont').onclick=guard(async e=>{
       const b=e.target.closest('[data-cf]');if(!b)return;
@@ -2710,7 +2761,9 @@ function drawCaption(){
   }).join(' ');
   const csz = typeof c.caption_size === 'number' ? c.caption_size : 1.0;
   const cfont = c.caption_font || t.font || 'Arial';
-  cap.style.cssText=`bottom:${(t.mv/1920*100).toFixed(1)}%;font:${t.bold?800:400} ${(t.size*k*csz).toFixed(1)}px/1.15 ${cfont},Helvetica,sans-serif;text-shadow:${t.box?'none':tplShadow(t,k)}${t.glow?',0 0 '+(10*k*4).toFixed(0)+'px '+t.outline:''}`;
+  const cpy = typeof c.caption_y === 'number' ? c.caption_y : (1.0 - t.mv / 1920);
+  const bottomPct = ((1.0 - cpy) * 100).toFixed(1);
+  cap.style.cssText=`bottom:${bottomPct}%;font:${t.bold?800:400} ${(t.size*k*csz).toFixed(1)}px/1.15 ${cfont},Helvetica,sans-serif;text-shadow:${t.box?'none':tplShadow(t,k)}${t.glow?',0 0 '+(10*k*4).toFixed(0)+'px '+t.outline:''}`;
   cap.innerHTML=t.box?`<span style="background:#000b;padding:.1em .35em;border-radius:4px">${html}</span>`:html;
 }
 function drawCues(){
@@ -2804,7 +2857,7 @@ if($('#s_fetch')) $('#s_fetch').onclick=guard(async()=>{
   }
 });
 $('#setBtn').onclick=guard(async()=>{
-  S.settings=await api('/api/settings');$('#s_model').value=S.settings.model||'base';$('#s_key').value='';
+  S.settings=await api('/api/settings');$('#s_model').value=S.settings.model||'large-v3-turbo';$('#s_key').value='';
   if($('#s_chan')) $('#s_chan').value=S.settings.my_channel||'';
   api('/api/learn').then(r=>{if($('#s_learn'))$('#s_learn').textContent=learnText(r)}).catch(()=>{});
   updateCookieUI();

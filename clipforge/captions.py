@@ -73,6 +73,14 @@ TEMPLATES = {
                             shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=160, scale_active=0, glow=0),
     "comic_pop": dict(font="Comic Sans MS", size=84, bold=1, primary="#FFFFFF", active="#FFD700", outline="#000000", ow=7,
                       shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=160, scale_active=0, glow=0),
+    "red_fury": dict(font="Arial", size=86, bold=1, primary="#FFFFFF", active="#FF1744", outline="#000000", ow=8,
+                     shadow=3, box=False, upper=True, pop=True, mode="phrase", mv=160, scale_active=110, glow=0),
+    "electric_violet": dict(font="Arial", size=84, bold=1, primary="#FFFFFF", active="#C084FC", outline="#581C87", ow=7,
+                            shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=165, scale_active=0, glow=1),
+    "clean_gold": dict(font="Arial", size=84, bold=1, primary="#FFFFFF", active="#F59E0B", outline="#000000", ow=7,
+                       shadow=2, box=False, upper=True, pop=False, mode="phrase", mv=160, scale_active=0, glow=0),
+    "cyber_cyan": dict(font="Arial", size=84, bold=1, primary="#FFFFFF", active="#00F5FF", outline="#083344", ow=8,
+                       shadow=2, box=False, upper=True, pop=True, mode="phrase", mv=165, scale_active=0, glow=1),
 }
 
 
@@ -143,7 +151,8 @@ def _esc(s):
 
 def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, emojis=True, hook_boost=True,
            banner_text="", banner_style="white_box", banner_x=0.5, banner_y=0.12,
-           banner_size=1.0, banner_font="Arial", caption_size=1.0, caption_font=None, banner_t0=None, banner_t1=None):
+           banner_size=1.0, banner_font="Arial", caption_size=1.0, caption_font=None,
+           caption_y=None, banner_t0=None, banner_t1=None):
     """banner_t0/banner_t1: when the hook text shows, in seconds on the clip timeline (None = whole clip)."""
     t = TEMPLATES.get(template) or TEMPLATES["yellow_pop"]
     style_box = 3 if t["box"] else 1
@@ -154,7 +163,10 @@ def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, e
     scale = float(height) / 1920.0
     cfont = caption_font if caption_font else t["font"]
     fsize = max(24, int(round(t["size"] * float(caption_size or 1.0) * scale)))
-    mv = max(28, int(round(t["mv"] * scale)))
+    if caption_y is not None:
+        mv = max(28, int(round(height * (1.0 - max(0.5, min(0.98, float(caption_y)))))))
+    else:
+        mv = max(28, int(round(t["mv"] * scale)))
     ow = max(2, int(round(t["ow"] * scale)))
     sh = max(1, int(round(t["shadow"] * scale)))
     bfont = banner_font if banner_font else "Arial"
