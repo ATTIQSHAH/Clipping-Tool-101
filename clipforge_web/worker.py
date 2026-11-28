@@ -61,7 +61,7 @@ def _loop():
         status, err = "done", None
         try:
             if row["type"] == "analyze":
-                params.setdefault("model", db.setting("model", "base"))
+                params.setdefault("model", db.setting("model", "large-v3-turbo"))
             FUNCS[row["type"]](job, row["ref_id"], params)
             if row["type"] == "ingest" and params.get("then_analyze") is not None:
                 db.ex("update videos set status='analyzing', progress=0, stage='Getting ready' where id=?", (row["ref_id"],))

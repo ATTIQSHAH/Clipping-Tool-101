@@ -204,7 +204,7 @@ def _clip_out(c):
 def _then(body):
     c = body.get("clips")
     return {"clips": c, "length": body.get("length", 30),
-            "whisper_model": body.get("whisper_model", "base")} if c else None
+            "whisper_model": body.get("whisper_model", "large-v3-turbo")} if c else None
 
 
 # ---------------- videos ----------------
@@ -261,7 +261,7 @@ def delete_video(vid: int):
 @app.post("/api/videos/upload")
 async def upload_video(file: UploadFile = File(...), client_id: Optional[int] = None,
                        clips: Optional[int] = None, length: Optional[float] = None,
-                       whisper_model: Optional[str] = "base"):
+                       whisper_model: Optional[str] = "large-v3-turbo"):
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in EXTS:
         raise HTTPException(400, f"Unsupported format {ext}. Use: " + ", ".join(sorted(EXTS)))
@@ -452,6 +452,7 @@ def _delete_clip_files(cid):
 @app.delete("/api/clips/{cid}")
 def delete_clip(cid: int):
     _clip(cid)
+    worker.cancel_for("render", cid)
     _delete_clip_files(cid)
     db.ex("delete from jobs where type='render' and ref_id=?", (cid,))
     db.ex("delete from clips where id=?", (cid,))
@@ -572,6 +573,10 @@ def patch_clip(cid: int, body: dict = Body(...)):
             vals.append(float(val))
         else:
             vals.append(str(val) if val is not None else "")
+    if body.get("status") == "rejected":
+        worker.cancel_for("render", cid)
+        sets.append("render_status='none'")
+        sets.append("render_progress=0")
     if "cam_corner" in body or "layout" in body:
         sets.append("cam=null")
     if "start" in body or "end" in body:
@@ -582,8 +587,9 @@ def patch_clip(cid: int, body: dict = Body(...)):
         sets += ["start=?", "end=?"]
         vals += [round(s, 3), round(e, 3)]
     if sets:
-        render_keys = any(not x.startswith(("status", "title", "views")) for x in sets)
-        if render_keys and c["render_status"] != "running":
+        is_reject = body.get("status") == "rejected"
+        render_keys = any(not x.startswith(("status", "title", "views", "render_status", "render_progress")) for x in sets)
+        if render_keys and not is_reject and c["render_status"] != "running":
             sets.append("render_status='stale'")
         db.ex(f"update clips set {','.join(sets)} where id=?", vals + [cid])
     return _clip_out(_clip(cid))
@@ -742,6 +748,14 @@ def trigger_render(cid: int):
     db.ex("update clips set render_status='queued', render_progress=0 where id=?", (cid,))
     worker.enqueue("render", cid)
     return {"ok": True}
+
+
+@app.post("/api/clips/{cid}/cancel")
+def cancel_clip_render(cid: int):
+    _clip(cid)
+    worker.cancel_for("render", cid)
+    db.ex("update clips set render_status='stale', render_progress=0 where id=?", (cid,))
+    return {"ok": True, "clip": _clip_out(_clip(cid))}
 
 
 @app.get("/api/clips/{cid}/download")

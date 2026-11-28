@@ -168,7 +168,11 @@ def dumps(x):
 
 def setting(key, default=""):
     r = q("select value from settings where key=?", (key,), one=True)
-    return r["value"] if r else default
+    if r and r["value"]:
+        return r["value"]
+    if key == "model" and not default:
+        return "large-v3-turbo"
+    return default
 
 
 def set_setting(key, value):

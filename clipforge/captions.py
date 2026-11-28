@@ -102,14 +102,18 @@ def to_srt(cues):
     return "\n".join(out)
 
 
-def build_cues(words, max_words=3, max_chars=22, gap=0.35):
-    """Group words into short cues. words: [{'w','start','end'}] on the clip timeline."""
+def build_cues(words, max_words=4, max_chars=26, gap=0.55):
+    """Group words into natural, readable subtitle phrases (3-5 words).
+    words: [{'w','start','end'}] on the clip timeline."""
     groups, cur = [], []
     for w in words:
         if cur:
             chars = sum(len(x["w"]) + 1 for x in cur) + len(w["w"])
-            if (len(cur) >= max_words or chars > max_chars or w["start"] - cur[-1]["end"] > gap
-                    or cur[-1]["w"].endswith(SENT + (",",))):
+            time_gap = w["start"] - cur[-1]["end"]
+            sentence_end = cur[-1]["w"].endswith(SENT)
+            comma_pause = cur[-1]["w"].endswith((",", ";", ":")) and time_gap >= 0.35
+            if (len(cur) >= max_words or chars > max_chars or time_gap > gap
+                    or sentence_end or comma_pause):
                 groups.append(cur)
                 cur = []
         cur.append(w)
@@ -120,10 +124,16 @@ def build_cues(words, max_words=3, max_chars=22, gap=0.35):
         nxt = groups[i + 1][0]["start"] if i + 1 < len(groups) else 1e9
         prev_end = cues[-1]["end"] if cues else 0.0
         start = max(g[0]["start"] - 0.03, prev_end)
-        end = min(g[-1]["end"] + 0.12, nxt)
-        end = max(end, min(start + 0.35, nxt))          # min on-screen time
-        end = min(end, max(start + 2.0, g[-1]["end"]))  # max on-screen time
-        cues.append({"start": start, "end": end, "words": g})
+        # Ensure comfortable on-screen reading duration (at least 1.3s to 2.2s unless next speech begins)
+        raw_dur = g[-1]["end"] - g[0]["start"]
+        ideal_dur = max(raw_dur + 0.4, min(1.4, len(g) * 0.45 + 0.5))
+        if nxt < 1e8:
+            end = min(start + ideal_dur, nxt - 0.02)
+            end = max(end, min(start + 0.75, nxt - 0.01))
+        else:
+            end = min(start + max(ideal_dur, 1.8), g[-1]["end"] + 1.8)
+        end = max(end, g[-1]["end"] + 0.15)
+        cues.append({"start": round(start, 3), "end": round(end, 3), "words": g})
     return cues
 
 
@@ -222,15 +232,25 @@ def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, e
             
         for i, w in enumerate(raw_words):
             s = cue["start"] if i == 0 else w["start"]
-            e = raw_words[i + 1]["start"] if i + 1 < len(processed_words) else cue["end"]
-            
-            # Attention grabber for first 3-6s: extra pop + bounce
-            is_hook = hook_boost and s < 4.5
-            if is_hook:
-                pop = r"{\fscx112\fscy112\t(0,100,\fscx100\fscy100)}"
+            # Hold the word highlight until the next word begins, or until the end of the cue
+            if i + 1 < len(processed_words):
+                e = raw_words[i + 1]["start"]
             else:
-                pop = r"{\fscx82\fscy82\t(0,90,\fscx100\fscy100)}" if t["pop"] else ""
-                
+                e = max(w["end"] + 0.15, cue["end"])
+            if e <= s:
+                e = s + 0.1
+
+            # Attention grabber pop animation: ONLY at the entrance of the phrase (i == 0) or in single-word mode!
+            # Never shake/pop on every single word transition inside a multi-word phrase!
+            is_hook = hook_boost and s < 4.5
+            if i == 0 or t["mode"] == "word":
+                if is_hook:
+                    pop = r"{\fscx108\fscy108\t(0,90,\fscx100\fscy100)}"
+                else:
+                    pop = r"{\fscx85\fscy85\t(0,80,\fscx100\fscy100)}" if t["pop"] else ""
+            else:
+                pop = ""
+
             if t["mode"] == "word":
                 body = processed_words[i]
             else:
@@ -246,5 +266,5 @@ def to_ass(cues, template="yellow_pop", width=1080, height=1920, censor=False, e
                         tag += f"\\fscx{cur_scale}\\fscy{cur_scale}"
                     parts.append(f"{{{tag}}}{txt}")
                 body = " ".join(parts)
-            lines.append(f"Dialogue: 0,{_ts(s)},{_ts(e)},,Main,0,0,0,,{glow}{pop if (i == 0 or t['mode'] == 'word' or is_hook) else ''}{body}")
+            lines.append(f"Dialogue: 0,{_ts(s)},{_ts(e)},,Main,0,0,0,,{glow}{pop}{body}")
     return head + "\n".join(lines) + "\n"
